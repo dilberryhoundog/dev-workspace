@@ -1,0 +1,31 @@
+name: 🚀 Quick Capture
+description: Quickly capture an idea or bug to detail later
+title: "[Quick] "
+labels: [ "quick-capture", "needs-triage" ]
+body:
+  - type: textarea
+    id: capture
+    attributes:
+      label: Quick Description
+      description: What's on your mind? Details can come later.
+      placeholder: Brief description of the idea, bug, or task...
+    validations:
+      required: true
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      options:
+        - Bug
+        - Feature
+        - Enhancement
+        - Question
+        - Chore
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        *Made with `🚀 Quick Capture` template*

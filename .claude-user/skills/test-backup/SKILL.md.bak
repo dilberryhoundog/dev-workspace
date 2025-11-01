@@ -1,0 +1,26 @@
+---
+name: test-skill
+description: testbed for testing skills - Use when the user want to test skill functionality.
+---
+
+# Skill Test
+
+Lightweight testbed for testing skills. 
+
+
+## Decision matrix
+**Use `<AskUserQuestion>` tool** to determine which reference to use. If the User has provided context, use that instead.
+
+<!--
+Only use the AUQ tool, or progress confidently to the correct reference. Do not reply.
+-->
+
+## references
+### AI
+[references/ai.md](references/ai.md)  
+- Search Ai documentation
+- Declare / Choose favorite Ai.
+
+### Cars
+[references/cars.md](references/cars.md)
+A list of cars to reference, with make, model, year, and engine type.

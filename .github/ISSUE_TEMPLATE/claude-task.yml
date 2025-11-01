@@ -1,0 +1,77 @@
+name: 🤖 Claude Code Task
+description: Task optimized for Claude Code execution
+title: "[Claude] "
+labels: [ "claude-task" ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This template is optimized for Claude Code to understand and execute tasks efficiently.
+
+  - type: textarea
+    id: objective
+    attributes:
+      label: Task Objective
+      description: What should Claude accomplish?
+      placeholder: Clear, actionable objective for Claude...
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context & Files
+      description: What files, patterns, or context is relevant?
+      placeholder: |
+        - Relevant files: app/models/client.rb, app/views/clients/*
+        - Related patterns: Follow authentication patterns in app/controllers/auth/
+        - Existing feature to reference: jobs#index filtering
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Success Criteria
+      description: How will we know this is done correctly?
+      placeholder: |
+        - [ ] Feature works as specified
+        - [ ] Tests pass
+        - [ ] Follows project patterns in CLAUDE.md
+        - [ ] Documentation updated if needed
+    validations:
+      required: false
+
+  #  - type: dropdown
+  #    id: workflow_stage
+  #    attributes:
+  #      label: Workflow Stage
+  #      description: Which stage of the development workflow?
+  #      options:
+  #        - "1. Model & Plan"
+  #        - "2. Initial Page Prototypes"
+  #        - "3. Build Simple Implementation"
+  #        - "4. Add Core Tests"
+  #        - "5. Enhance Backend"
+  #        - "6. Enhance Frontend"
+  #        - "7. Maintain & Iterate"
+  #    validations:
+  #      required: false
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints & Preferences
+      description: Any specific requirements or preferences?
+      placeholder: |
+        - Use existing CSS components
+        - Follow REST conventions
+        - Keep controllers thin
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        *Made with `🤖 Claude Code Task` template*

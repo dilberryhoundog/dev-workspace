@@ -1,0 +1,43 @@
+name: 🔧 GitHub Workflow Task
+description: Task for improving GitHub CLI + Claude Code workflow
+title: "[Workflow] "
+labels: [ "workflow", "github-cli" ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For tasks that improve the GitHub CLI + Claude Code development workflow.
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Tool/Area
+      options:
+        - CLAUDE.md
+        - Issue Templates
+        - PR Template
+        - Slash Commands
+        - Output Styles
+        - GitHub Actions
+        - Settings/Permissions
+    validations:
+      required: true
+  - type: textarea
+    id: improvement
+    attributes:
+      label: Proposed Improvement
+      description: What should be improved and why?
+    validations:
+      required: true
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Ideas
+      description: How could this be implemented?
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        *Made with `🔧 GitHub Workflow Task` template*

@@ -1,0 +1,54 @@
+name: 🔧 Refactoring/Chore
+description: Code improvement, refactoring, or maintenance task
+title: "[Refactor] "
+labels: [ "refactor", "chore" ]
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Task Type
+      options:
+        - Refactoring
+        - Documentation
+        - Dependencies
+        - Configuration
+        - Performance
+        - Code Quality
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs to be done and why?
+      placeholder: Describe the refactoring or maintenance task...
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What files/areas will be affected?
+      placeholder: List files, directories, or areas of the codebase...
+    validations:
+      required: false
+
+  - type: textarea
+    id: benefits
+    attributes:
+      label: Expected Benefits
+      description: What improvements will this bring?
+      placeholder: |
+        - Improved readability
+        - Better performance
+        - Reduced complexity
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+        *Made with `🔧 Refactoring/Chore` template*
