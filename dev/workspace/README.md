@@ -1,6 +1,6 @@
 # Dev Workspace
 
-A structured development environment for AI-assisted coding sessions. Provides context persistence, searchable conversation history, automated workflows, and merge-safe branch management.
+A great team's focused workspace ready to shape, build, store and reveal context to claude.
 
 ## Installation
 
