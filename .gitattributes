@@ -1,7 +1,0 @@
-# See https://git-scm.com/docs/gitattributes for more about git attribute files.
-
-# Other settings here
-
-# Protect workspace template on main branch during merges
-dev/workspace/** merge=ours
-.claude/config/** merge=ours
