@@ -18,7 +18,7 @@ Check that dev/workspace/reviews/merge-preflight.md exists.
 If missing:
 STOP
 Output: "❌ No preflight report found"
-Output: "Run: /workspace/merge-preflight"
+Output: "Run: /workspace:merge-preflight"
 Exit
 
 Read preflight report.
@@ -28,7 +28,7 @@ Check for "All preflight checks passed" status.
 If the report shows blocking issues:
 STOP
 Output: "❌ Preflight report shows blocking issues"
-Output: "Fix issues and rerun: /workspace/merge-preflight"
+Output: "Fix issues and rerun: /workspace:merge-preflight"
 Exit
 
 ### Step 2: Read Merge Configuration

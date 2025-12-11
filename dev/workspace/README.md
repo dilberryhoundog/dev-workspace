@@ -1,6 +1,6 @@
 # Dev Workspace
 
-A great team's focused workspace ready to shape, build, store and reveal context to claude.
+A great team-focused workspace ready to shape, build, store and reveal context to claude.
 
 ## Installation
 
