@@ -1,0 +1,64 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4a90d9', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2d5a87', 'lineColor': '#5c6bc0', 'secondaryColor': '#81c784', 'tertiaryColor': '#fff3e0'}}}%%
+
+flowchart TB
+    subgraph UPSTREAM["🏛️ UPSTREAM (Original OSS Repo)"]
+        direction TB
+        UM[main]
+        UPR[PR review]
+
+        UPR -->|maintainer merges| UM
+    end
+
+    subgraph ORIGIN["☁️ ORIGIN (Your Fork)"]
+        direction TB
+        OM[main]
+        OD[dev]
+        OF[feature/*]
+        OP[pr/*]
+    end
+
+    subgraph LOCAL["🖥️ LOCAL"]
+        direction TB
+        LM[main<br/>pristine]
+        LD[dev<br/>workspace parent]
+        LF[feature/*<br/>workspace child]
+        LP[pr/*<br/>clean submission]
+
+        LD -->|rebase onto| LM
+        LF -->|rebase onto| LD
+    end
+
+    %% Upstream sync flow (pristine main)
+    UM -->|"fetch upstream"| LM
+    LM -->|"push (mirror)"| OM
+
+    %% Dev branch sync
+    LM -->|"rebase dev onto latest"| LD
+    LD -->|push| OD
+
+    %% Workspace flow (messy iteration)
+    LD -->|"branch from"| LF
+    LF -->|push| OF
+
+    %% PR submission flow (clean)
+    LM -->|"branch from"| LP
+    LF -.->|"cherry-pick clean commits"| LP
+    LP -->|push| OP
+    OP -.->|"open PR"| UPR
+
+    %% Styling
+    classDef upstream fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef origin fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    classDef local fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef branch fill:#fff,stroke:#666,stroke-width:1px,color:#333
+    classDef pristine fill:#e8eaf6,stroke:#3f51b5,stroke-width:2px,color:#333
+    classDef working fill:#fff8e1,stroke:#ffc107,stroke-width:2px,color:#333
+    classDef pr fill:#fce4ec,stroke:#c2185b,stroke-width:1px,color:#333
+
+    class UPSTREAM upstream
+    class ORIGIN origin
+    class LOCAL local
+    class LM,OM pristine
+    class LD,OD working
+    class LF,OF branch
+    class LP,OP,UPR pr

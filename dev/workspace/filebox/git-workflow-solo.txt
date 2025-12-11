@@ -1,0 +1,22 @@
+===> LOCAL MAIN <===
+<-- [ORIGIN MAIN]  $ git fetch/pull origin main
+--> [ORIGIN MAIN]  $ git push origin main
+<-- [dev branches] $ git checkout feature/* -- dev/branches/
+
+===> LOCAL FEATURE/* <===
+<-- [LOCAL MAIN]   $ git merge main  OR  git rebase main
+--> [ORIGIN FEAT]  $ git push origin feature/x
+--> [ORIGIN MAIN]  (via PR on GitHub, then merge)
+
+===============================================================
+
+Fetch = downloads changes but doesn't touch your working branch.
+Pull = fetch + merge (applies changes immediately).
+- Use fetch when you want to inspect before integrating.
+
+Merge = creates a merge commit preserving both branches.
+Rebase = Current branch commits are moved ahead of the incoming branch.
+- Use rebase for clean history, merge when you want to preserve the branch structure.
+
+
+ Rule of thumb: rebase your local/unpushed work, merge shared branches.

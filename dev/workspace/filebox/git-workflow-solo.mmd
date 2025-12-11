@@ -1,0 +1,34 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4a90d9', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2d5a87', 'lineColor': '#5c6bc0', 'secondaryColor': '#81c784', 'tertiaryColor': '#fff3e0'}}}%%
+
+flowchart TB
+    subgraph LOCAL["🖥️ LOCAL"]
+        direction TB
+        LM[main]
+        LF[feature/*]
+
+        LF -->|merge / rebase| LM
+    end
+
+    subgraph ORIGIN["☁️ ORIGIN (GitHub)"]
+        direction TB
+        OM[main]
+        OF[feature/*]
+    end
+
+    %% Push/Pull relationships
+    LM -->|push| OM
+    OM -->|pull / fetch| LM
+
+    LF -->|push| OF
+
+    %% PR flow
+    OF -.->|PR & merge| OM
+
+    %% Styling
+    classDef local fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    classDef origin fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
+    classDef branch fill:#fff,stroke:#666,stroke-width:1px,color:#333
+
+    class LOCAL local
+    class ORIGIN origin
+    class LM,LF,OM,OF branch

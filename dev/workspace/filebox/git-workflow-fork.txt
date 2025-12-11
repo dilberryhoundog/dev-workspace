@@ -1,0 +1,28 @@
+(pristine from origin)
+===> LOCAL MAIN <===
+<-- [ORIGIN MAIN]     $ git fetch origin main && git merge origin/main
+--> [FORK MAIN]       $ git push fork main
+--> [LOCAL PR/*]      $ git checkout main && git checkout -b pr/feature-name
+
+
+(workspace parent)
+===> LOCAL COMMAND <===
+<-- [LOCAL MAIN]      $ git rebase main
+--> [FORK COMMAND]  $ git push fork command
+<-- [dev branches]    $ git checkout feature/* -- dev/branches/
+
+
+(workspace child)
+===> LOCAL FEATURE/* <===
+<-- [LOCAL COMMAND]   $ git rebase command
+--> [ORIGIN FEAT]     $ git push origin feature/x
+
+
+(clean submission to origin)
+===> LOCAL PR/* <===
+<-- [LOCAL FEATURE]   $ git cherry-pick <commit> OR git cherry-pick <start>..<end>
+--> [FORK PR]       $ git push fork pr/feature-name
+--> [ORIGIN MAIN]   (via PR on GitHub, then maintainer merges)
+
+
+==================================================================
