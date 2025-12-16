@@ -1,0 +1,125 @@
+#!/bin/bash
+# Merges current branch to main branch after validation.
+# Blocks if command branch exists (use merge-to-command instead).
+# Usage: dev/run/merge-to-main [--squash|--rebase]
+#   --squash  Squash merge (combine all commits)
+#   --rebase  Rebase merge (replay commits)
+#   (default) Full history merge
+
+set -e
+
+# Step 1: Parse merge strategy argument
+MERGE_FLAG=""
+STRATEGY_NAME="merge (full history)"
+if [[ "$1" == "--squash" ]]; then
+    MERGE_FLAG="--squash"
+    STRATEGY_NAME="squash"
+elif [[ "$1" == "--rebase" ]]; then
+    MERGE_FLAG="--rebase"
+    STRATEGY_NAME="rebase"
+fi
+
+# Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" || "$CURRENT_BRANCH" == "command" ]]; then
+    echo "❌ Cannot merge from $CURRENT_BRANCH branch"
+    exit 1
+fi
+
+# Get remote for current branch (defaults to origin)
+REMOTE=$(git config "branch.$CURRENT_BRANCH.remote" 2>/dev/null || echo "origin")
+
+# Step 2: Check if command branch exists (fork workflow)
+git fetch "$REMOTE" >/dev/null 2>&1
+if git rev-parse --verify "$REMOTE/command" >/dev/null 2>&1; then
+    echo "❌ Command branch exists on $REMOTE"
+    echo ""
+    echo "   This repo uses a fork workflow. Do not merge directly to main."
+    echo "   Instead use:"
+    echo "     - dev/run/merge-to-command    (merge feature → command)"
+    echo "     - dev/run/pull-to-pristine-main (sync main with upstream)"
+    exit 1
+fi
+
+echo "📋 Merge to main"
+echo "   Branch:   $CURRENT_BRANCH"
+echo "   Strategy: $STRATEGY_NAME"
+echo "   Remote:   $REMOTE"
+echo ""
+
+# Step 3: Check working tree is clean
+if [[ -n $(git status --porcelain) ]]; then
+    echo "❌ Working tree is not clean"
+    git status --short
+    exit 1
+fi
+echo "✓ Working tree is clean"
+
+# Step 4: Check for PR
+PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null)
+if [[ -z "$PR_NUMBER" ]]; then
+    echo "❌ No PR exists for this branch"
+    echo "   Create one with: gh pr create"
+    exit 1
+fi
+echo "✓ PR #$PR_NUMBER exists"
+
+# Step 5: Fetch and check for merge conflicts with main
+echo ""
+echo "🔄 Fetching $REMOTE..."
+git fetch "$REMOTE" main >/dev/null 2>&1
+
+MERGE_BASE=$(git merge-base HEAD "$REMOTE/main" 2>/dev/null)
+if [[ -n "$MERGE_BASE" ]]; then
+    CONFLICTS=$(git merge-tree "$MERGE_BASE" HEAD "$REMOTE/main" 2>/dev/null | grep -c "^<<<<<<<" || true)
+    if [[ "$CONFLICTS" -gt 0 ]]; then
+        echo "❌ Merge conflicts detected with main branch"
+        echo "   Resolve with: git merge $REMOTE/main"
+        exit 1
+    fi
+fi
+echo "✓ No merge conflicts"
+
+# Step 6: Push to origin
+echo ""
+echo "🔄 Pushing to $REMOTE..."
+git push "$REMOTE" "$CURRENT_BRANCH"
+echo "✓ Pushed to $REMOTE/$CURRENT_BRANCH"
+
+# Step 7: Merge to main
+echo ""
+echo "🔄 Merging to main..."
+
+if [[ "$MERGE_FLAG" == "--rebase" ]]; then
+    # Rebase: replay commits onto main, then fast-forward
+    git pull "$REMOTE" main --rebase=false
+    git rebase "$REMOTE/main"
+    git checkout main
+    git merge --ff-only "$CURRENT_BRANCH"
+else
+    git checkout main
+    git pull "$REMOTE" main
+
+    if [[ "$MERGE_FLAG" == "--squash" ]]; then
+        git merge --squash "$CURRENT_BRANCH"
+        git commit -m "🔀 merge: $CURRENT_BRANCH (squash)"
+    else
+        git merge "$CURRENT_BRANCH" -m "🔀 merge: $CURRENT_BRANCH"
+    fi
+fi
+
+echo "✓ Merged $CURRENT_BRANCH to main"
+
+# Step 8: Push main
+echo ""
+echo "🔄 Pushing main..."
+git push "$REMOTE" main
+echo "✓ Pushed main to $REMOTE"
+
+echo ""
+echo "═══════════════════════════════════════"
+echo "  ✓ Merge complete!"
+echo "═══════════════════════════════════════"
+echo ""
+echo "PR #$PR_NUMBER can now be closed"
+echo "To delete the branch: git branch -d $CURRENT_BRANCH"
