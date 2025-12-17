@@ -85,7 +85,7 @@
       }
     ]
   },
-  "outputStyle": "Concise",
+  "outputStyle": "default",
   "sandbox": {
     "enabled": false,
     "autoAllowBashIfSandboxed": true,
