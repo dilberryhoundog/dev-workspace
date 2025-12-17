@@ -1,0 +1,3 @@
+#!/bin/bash
+
+# use headless claude to create PR on current working branch
