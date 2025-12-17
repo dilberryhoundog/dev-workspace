@@ -1,5 +1,5 @@
 ---
-remote: fork
+remote: origin
 parent_branch: main
 ---
 
