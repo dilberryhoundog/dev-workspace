@@ -1,0 +1,55 @@
+# workspace.yml — Branch Workspace Context
+#
+# Location: dev/workspace/workspace.yml
+# Human and agent-readable context for the current branch workspace.
+# NOT read by the dev-workspace script — this is for Claude and you.
+#
+# Load into Claude's context with: @dev/workspace/workspace.yml
+# This file transfers to new branches via parent workspace inheritance.
+
+# ==============================================================================
+# BRANCH INFO — Updated per branch by agent or human
+# ==============================================================================
+
+branch:
+  name:                              # filled when workspace is created
+  started:                           # yyyy-mm-dd
+  status: in_progress                # in_progress | complete | discarded
+
+  purpose: |
+    # Claude will place a purpose statement here when creating the workspace.
+
+# ==============================================================================
+# TRACKING
+# ==============================================================================
+
+issues:
+  # track_github_issues: true
+  # numbers:
+  #   - "#123"
+  #   - "#456"
+
+# ==============================================================================
+# WORKFLOW
+# ==============================================================================
+
+workflow:
+  type: standard                     # quick | single_plan | multi_stage
+  # quick:         Direct implementation, no planning phase
+  # single_plan:   Plan once, execute
+  # multi_stage:   Iterative planning and execution
+
+testing:
+  # required: true
+  # notes: |
+  #   Update relevant tests as per testing strategy.
+  #   All tests must pass before PR.
+
+# ==============================================================================
+# PLANS — Check the box to have Claude read at session start
+# ==============================================================================
+
+plans:
+  # - dev/workspace/plans/prd.md
+  # - dev/workspace/plans/architectural.md
+  # - dev/workspace/context/discover.md

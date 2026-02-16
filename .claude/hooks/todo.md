@@ -1,0 +1,1 @@
+- create tool use hook to save file path from write / edit tool. Save in workspace.md file paths
