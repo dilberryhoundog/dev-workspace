@@ -1,0 +1,215 @@
+#!/bin/bash
+
+### Merges current branch to parent (per WORKSPACE.md).
+# Reads remote, parent_branch, and merge strategy from dev/workspace/WORKSPACE.md
+# Usage: dev/run/merge-branch [--squash|--rebase]
+#   --squash  Override: squash merge
+#   --rebase  Override: rebase merge
+#   (default) Uses strategy from WORKSPACE.md, or full history merge
+
+set -e
+
+WORKSPACE_FILE="dev/workspace/WORKSPACE.md"
+
+# Step 1: Check WORKSPACE.md exists
+if [[ ! -f "$WORKSPACE_FILE" ]]; then
+    echo "❌ WORKSPACE.md not found at $WORKSPACE_FILE"
+    exit 1
+fi
+
+# Step 2: Parse front matter
+REMOTE=$(sed -n '/^---$/,/^---$/p' "$WORKSPACE_FILE" | grep "^remote:" | cut -d: -f2 | tr -d ' ')
+PARENT_BRANCH=$(sed -n '/^---$/,/^---$/p' "$WORKSPACE_FILE" | grep "^parent_branch:" | cut -d: -f2 | tr -d ' ')
+
+# Defaults if not specified
+REMOTE="${REMOTE:-origin}"
+PARENT_BRANCH="${PARENT_BRANCH:-main}"
+
+# Step 3: Parse merge strategy from checkboxes (can be overridden by args)
+MERGE_FLAG=""
+STRATEGY_NAME="merge"
+
+if grep -q "\- \[x\] Squash merge" "$WORKSPACE_FILE"; then
+    MERGE_FLAG="--squash"
+    STRATEGY_NAME="squash"
+elif grep -q "\- \[x\] Rebase merge" "$WORKSPACE_FILE"; then
+    MERGE_FLAG="--rebase"
+    STRATEGY_NAME="rebase"
+fi
+
+# Allow command line override
+for arg in "$@"; do
+    case $arg in
+        --squash)
+            MERGE_FLAG="--squash"
+            STRATEGY_NAME="squash"
+            ;;
+        --rebase)
+            MERGE_FLAG="--rebase"
+            STRATEGY_NAME="rebase"
+            ;;
+    esac
+done
+
+# Step 4: Get current branch and validate
+CURRENT_BRANCH=$(git branch --show-current)
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" || "$CURRENT_BRANCH" == "command" ]]; then
+    echo "❌ Cannot merge from $CURRENT_BRANCH branch"
+    exit 1
+fi
+
+echo "📋 Merge branch"
+echo "   Branch:   $CURRENT_BRANCH"
+echo "   Target:   $PARENT_BRANCH"
+echo "   Remote:   $REMOTE"
+echo "   Strategy: $STRATEGY_NAME"
+echo ""
+
+# Step 5: Check working tree is clean
+if [[ -n $(git status --porcelain) ]]; then
+    echo "❌ Working tree is not clean"
+    git status --short
+    exit 1
+fi
+echo "✓ Working tree is clean"
+
+# Step 6: Fetch and check for merge conflicts
+echo ""
+echo "🔄 Fetching $REMOTE..."
+git fetch "$REMOTE" "$PARENT_BRANCH" >/dev/null 2>&1
+
+MERGE_BASE=$(git merge-base HEAD "$REMOTE/$PARENT_BRANCH" 2>/dev/null || true)
+if [[ -n "$MERGE_BASE" ]]; then
+    CONFLICTS=$(git merge-tree "$MERGE_BASE" HEAD "$REMOTE/$PARENT_BRANCH" 2>/dev/null | grep -c "^<<<<<<<" || true)
+    if [[ "$CONFLICTS" -gt 0 ]]; then
+        echo "❌ Merge conflicts detected with $PARENT_BRANCH"
+        echo "   Resolve with: git merge $REMOTE/$PARENT_BRANCH"
+        exit 1
+    fi
+fi
+echo "✓ No merge conflicts"
+echo ""
+
+# ==============================================================================
+# Merge functions
+# ==============================================================================
+
+# After a --no-commit merge, unstage workspace files so the parent branch's
+# version is kept and new files from the feature branch are discarded.
+restore_workspace() {
+    if git diff --cached --name-only | grep -q "^dev/workspace/"; then
+        echo "🧹 Restoring workspace files..."
+        git reset HEAD -- dev/workspace/ >/dev/null 2>&1 || true
+        git checkout -- dev/workspace/ >/dev/null 2>&1 || true
+        git clean -fd -- dev/workspace/ >/dev/null 2>&1 || true
+        echo "✓ Workspace files preserved"
+    fi
+}
+
+do_local_merge() {
+    # Push branch first
+    echo "🔄 Pushing to $REMOTE..."
+    git push "$REMOTE" "$CURRENT_BRANCH"
+    echo "✓ Pushed to $REMOTE/$CURRENT_BRANCH"
+    echo ""
+
+    # Merge to parent branch
+    echo "🔄 Merging to $PARENT_BRANCH..."
+
+    if [[ "$MERGE_FLAG" == "--rebase" ]]; then
+        git pull "$REMOTE" "$PARENT_BRANCH" --rebase=false
+        git rebase "$REMOTE/$PARENT_BRANCH"
+        git checkout "$PARENT_BRANCH"
+        git merge --ff-only "$CURRENT_BRANCH"
+    else
+        git checkout "$PARENT_BRANCH"
+        git pull "$REMOTE" "$PARENT_BRANCH"
+
+        if [[ "$MERGE_FLAG" == "--squash" ]]; then
+            git merge --squash "$CURRENT_BRANCH"
+            restore_workspace
+            git commit -m "🔀 merge: $CURRENT_BRANCH (squash)"
+        else
+            git merge --no-ff --no-commit "$CURRENT_BRANCH"
+            restore_workspace
+            git commit -m "🔀 merge: $CURRENT_BRANCH"
+        fi
+    fi
+
+    echo "✓ Merged $CURRENT_BRANCH to $PARENT_BRANCH"
+
+    # Push parent branch
+    echo ""
+    echo "🔄 Pushing $PARENT_BRANCH..."
+    git push "$REMOTE" "$PARENT_BRANCH"
+    echo "✓ Pushed $PARENT_BRANCH to $REMOTE"
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Local merge complete!"
+    echo "═══════════════════════════════════════"
+    echo ""
+    echo "To delete the branch: git branch -d $CURRENT_BRANCH"
+}
+
+do_github_merge() {
+    local pr_number=$1
+
+    # Push any unpushed commits first
+    echo "🔄 Pushing to $REMOTE..."
+    git push "$REMOTE" "$CURRENT_BRANCH"
+    echo "✓ Pushed to $REMOTE/$CURRENT_BRANCH"
+    echo ""
+
+    # Build gh pr merge flags
+    local gh_flags=""
+    case "$MERGE_FLAG" in
+        --squash) gh_flags="--squash" ;;
+        --rebase) gh_flags="--rebase" ;;
+        *)        gh_flags="--merge" ;;
+    esac
+
+    echo "🔄 Merging PR #$pr_number via GitHub..."
+    gh pr merge "$pr_number" $gh_flags
+
+    echo "✓ PR #$pr_number merged"
+
+    # Update local main
+    echo ""
+    echo "🔄 Updating local $PARENT_BRANCH..."
+    git checkout "$PARENT_BRANCH"
+    git pull "$REMOTE" "$PARENT_BRANCH"
+    echo "✓ Local $PARENT_BRANCH updated"
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ GitHub merge complete!"
+    echo "═══════════════════════════════════════"
+    echo ""
+    echo "PR #$pr_number merged via GitHub"
+    echo "To delete the branch: git branch -d $CURRENT_BRANCH && git push $REMOTE --delete $CURRENT_BRANCH"
+}
+
+# ==============================================================================
+# Step 7: Check for PR and decide merge path
+# ==============================================================================
+
+PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null || true)
+
+if [[ -n "$PR_NUMBER" ]]; then
+    echo "✓ PR #$PR_NUMBER exists"
+    echo ""
+    read -p "Merge PR #$PR_NUMBER via GitHub? [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] || { echo "Merge aborted."; exit 0; }
+    echo ""
+    do_github_merge "$PR_NUMBER"
+else
+    echo "⚠️  No PR exists for this branch"
+    echo ""
+    read -p "Merge locally without PR? [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] || { echo "Merge aborted. Create PR with: gh pr create"; exit 0; }
+    echo ""
+    do_local_merge
+fi

@@ -1,0 +1,266 @@
+#!/bin/bash
+
+### Pushes command branch to deploy repo with workspace/dev files stripped.
+# Uses a permanent git worktree to merge and strip without touching main checkout.
+# Creates proper merge commits preserving ancestry for deploy repo merges.
+#
+# First run:  Creates worktree, strips dirs, pushes initial state
+# Later runs: Merges source (--no-commit), strips dirs, commits as single
+#             merge commit, pushes. Merge conflicts show affected files and
+#             exit with instructions for manual resolution.
+#
+# Usage: dev/run/deploy-push [--dry-run]
+#   --dry-run  Show what would be done without making changes
+
+set -e
+
+# ==============================================================================
+# CONFIGURATION - Edit these to match your setup
+# ==============================================================================
+
+# Directories to remove before pushing to deploy
+# Add paths relative to repo root, one per line
+STRIP_DIRS=(
+    "dev/branches"
+)
+
+# Remote and branch configuration
+DEPLOY_REMOTE="deploy"
+DEPLOY_BRANCH="command-mirror"
+SOURCE_BRANCH="command"
+
+# Worktree configuration
+# Creates a sibling directory to the repo (e.g. ../fizzy-deploy)
+WORKTREE_BRANCH="deploy-push"
+REPO_ROOT=$(git rev-parse --show-toplevel)
+REPO_NAME=$(basename "$REPO_ROOT")
+WORKTREE_DIR="${REPO_ROOT}/../${REPO_NAME}-deploy"
+
+# ==============================================================================
+# SCRIPT START
+# ==============================================================================
+
+DRY_RUN=false
+for arg in "$@"; do
+    case $arg in
+        --dry-run)
+            DRY_RUN=true
+            ;;
+    esac
+done
+
+echo "🚀 Deploy Push"
+echo "   Source:      $SOURCE_BRANCH"
+echo "   Deploy to:   $DEPLOY_REMOTE/$DEPLOY_BRANCH"
+echo "   Worktree:    $WORKTREE_DIR"
+if [[ "$DRY_RUN" == true ]]; then
+    echo "   Mode:        DRY RUN (no changes)"
+fi
+echo ""
+
+# --- Validation ---
+
+# Verify deploy remote
+if ! git remote get-url "$DEPLOY_REMOTE" >/dev/null 2>&1; then
+    echo "❌ Remote '$DEPLOY_REMOTE' not found"
+    echo ""
+    echo "   Add it with:"
+    echo "   git remote add $DEPLOY_REMOTE git@github.com:dilberryhoundog/bizzy.git"
+    exit 1
+fi
+DEPLOY_URL=$(git remote get-url "$DEPLOY_REMOTE")
+echo "✓ Deploy remote: $DEPLOY_URL"
+
+# Verify source branch
+if ! git rev-parse --verify "$SOURCE_BRANCH" >/dev/null 2>&1; then
+    echo "❌ Source branch '$SOURCE_BRANCH' not found"
+    exit 1
+fi
+echo "✓ Source branch: $SOURCE_BRANCH"
+
+# --- Worktree setup (first run) ---
+
+if [[ ! -d "$WORKTREE_DIR" ]]; then
+    echo ""
+    echo "📁 Worktree not found at: $WORKTREE_DIR"
+    echo "   A permanent worktree will be created as a sibling directory."
+    echo "   This is a one-time setup step."
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo ""
+        echo "   Would create:"
+        echo "   - Branch: $WORKTREE_BRANCH (from $SOURCE_BRANCH)"
+        echo "   - Worktree: $WORKTREE_DIR"
+        echo ""
+        echo "═══════════════════════════════════════"
+        echo "  DRY RUN - No changes made"
+        echo "═══════════════════════════════════════"
+        exit 0
+    fi
+
+    echo ""
+    read -p "Create worktree? [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] || { echo "Setup aborted."; exit 0; }
+
+    echo ""
+    echo "🔧 Setting up worktree..."
+
+    # Create branch from source and add worktree
+    git branch "$WORKTREE_BRANCH" "$SOURCE_BRANCH" 2>/dev/null || true
+    git worktree add "$WORKTREE_DIR" "$WORKTREE_BRANCH"
+    echo "✓ Worktree created at $WORKTREE_DIR"
+
+    # Initial strip
+    echo ""
+    echo "🗑️  Initial directory strip..."
+    for dir in "${STRIP_DIRS[@]}"; do
+        git -C "$WORKTREE_DIR" rm -rf --ignore-unmatch "$dir" 2>/dev/null || true
+    done
+
+    if ! git -C "$WORKTREE_DIR" diff --cached --quiet; then
+        git -C "$WORKTREE_DIR" commit -m "🚀 deploy: initial strip of workspace directories"
+        echo "✓ Initial strip committed"
+    else
+        echo "✓ Nothing to strip (directories not present)"
+    fi
+
+    # Push initial state
+    echo ""
+    read -p "Push to $DEPLOY_REMOTE/$DEPLOY_BRANCH? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "🔄 Pushing to $DEPLOY_REMOTE/$DEPLOY_BRANCH..."
+        git -C "$WORKTREE_DIR" push "$DEPLOY_REMOTE" "$WORKTREE_BRANCH:$DEPLOY_BRANCH" --force
+        echo "✓ Pushed to $DEPLOY_REMOTE/$DEPLOY_BRANCH"
+        echo ""
+        echo "═══════════════════════════════════════"
+        echo "  ✓ Setup complete and pushed!"
+        echo "═══════════════════════════════════════"
+    else
+        echo ""
+        echo "═══════════════════════════════════════"
+        echo "  ✓ Setup complete (not pushed)"
+        echo "═══════════════════════════════════════"
+        echo ""
+        echo "Run deploy-push again to push."
+    fi
+    exit 0
+fi
+
+echo "✓ Worktree: $WORKTREE_DIR"
+
+# --- Pre-flight ---
+
+# Show strip dirs
+echo ""
+echo "📋 Directories to strip:"
+for dir in "${STRIP_DIRS[@]}"; do
+    if [[ -d "$REPO_ROOT/$dir" ]]; then
+        echo "   ✓ $dir"
+    else
+        echo "   - $dir (not present)"
+    fi
+done
+
+# Show source commit
+echo ""
+echo "📊 Source commit:"
+git log -1 --oneline "$SOURCE_BRANCH"
+
+# Check if already up to date
+SOURCE_HEAD=$(git rev-parse "$SOURCE_BRANCH")
+if git -C "$WORKTREE_DIR" merge-base --is-ancestor "$SOURCE_HEAD" HEAD 2>/dev/null; then
+    echo ""
+    echo "ℹ️  Already up to date — $SOURCE_BRANCH is already merged"
+    echo ""
+    read -p "Force push current state anyway? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo ""
+        echo "🔄 Pushing to $DEPLOY_REMOTE/$DEPLOY_BRANCH..."
+        git -C "$WORKTREE_DIR" push "$DEPLOY_REMOTE" "$WORKTREE_BRANCH:$DEPLOY_BRANCH" --force
+        echo ""
+        echo "═══════════════════════════════════════"
+        echo "  ✓ Deploy push complete (re-push)"
+        echo "═══════════════════════════════════════"
+    else
+        echo "Deploy skipped."
+    fi
+    exit 0
+fi
+
+# Dry run exit
+if [[ "$DRY_RUN" == true ]]; then
+    echo ""
+    echo "   Would merge $SOURCE_BRANCH, strip dirs, push to $DEPLOY_REMOTE/$DEPLOY_BRANCH"
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  DRY RUN - No changes made"
+    echo "═══════════════════════════════════════"
+    exit 0
+fi
+
+# --- Deploy ---
+
+echo ""
+read -p "Merge and push to $DEPLOY_REMOTE/$DEPLOY_BRANCH? [y/N] " -n 1 -r
+echo
+[[ $REPLY =~ ^[Yy]$ ]] || { echo "Deploy aborted."; exit 0; }
+
+# Merge source into worktree (no-ff ensures merge commit, no-commit lets us strip first)
+echo ""
+echo "🔄 Merging $SOURCE_BRANCH..."
+if ! git -C "$WORKTREE_DIR" merge "$SOURCE_BRANCH" --no-ff --no-commit --no-edit 2>/dev/null; then
+    CONFLICTS=$(git -C "$WORKTREE_DIR" diff --name-only --diff-filter=U 2>/dev/null)
+
+    if [[ -n "$CONFLICTS" ]]; then
+        echo ""
+        echo "❌ Merge conflicts detected:"
+        echo ""
+        echo "$CONFLICTS" | while IFS= read -r file; do
+            echo "   ⚠  $file"
+        done
+        echo ""
+        echo "   Resolve manually:"
+        echo "     cd $WORKTREE_DIR"
+        echo "     # edit conflicted files"
+        echo "     git add <resolved-files>"
+        echo "     git commit"
+        echo ""
+        echo "   Or abort:"
+        echo "     git -C \"$WORKTREE_DIR\" merge --abort"
+        exit 1
+    fi
+
+    echo "❌ Merge failed"
+    exit 1
+fi
+echo "✓ Merged (uncommitted)"
+
+# Strip configured directories
+echo "🗑️  Stripping directories..."
+for dir in "${STRIP_DIRS[@]}"; do
+    git -C "$WORKTREE_DIR" rm -rf --ignore-unmatch "$dir" 2>/dev/null || true
+done
+
+# Commit as single merge commit (has both parents: previous deploy + source)
+echo "📝 Committing..."
+git -C "$WORKTREE_DIR" commit -m "🚀 deploy: merge $SOURCE_BRANCH, strip workspace directories"
+echo "✓ Committed"
+
+# Push
+echo ""
+echo "🔄 Pushing to $DEPLOY_REMOTE/$DEPLOY_BRANCH..."
+git -C "$WORKTREE_DIR" push "$DEPLOY_REMOTE" "$WORKTREE_BRANCH:$DEPLOY_BRANCH" --force
+echo "✓ Pushed to $DEPLOY_REMOTE/$DEPLOY_BRANCH"
+
+echo ""
+echo "═══════════════════════════════════════"
+echo "  ✓ Deploy push complete!"
+echo "═══════════════════════════════════════"
+echo ""
+echo "Next steps:"
+echo "  1. In bizzy: dev/run/merge-staging"
+echo "  2. Review and deploy: dev/run/deploy-staging"

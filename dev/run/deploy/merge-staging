@@ -1,0 +1,25 @@
+#!/bin/bash
+### Merge command mirror into staging
+# Pulls latest mirror and merges into staging.
+# Deploy config is preserved by three-way merge + merge=protect driver.
+
+set -e
+
+git switch staging
+
+echo ""
+echo "── Merge command-mirror into staging ──"
+echo ""
+
+echo "→ Fetching latest command-mirror..."
+git fetch origin command-mirror
+
+echo "→ Merging origin/command-mirror into staging..."
+git merge origin/command-mirror --no-edit
+
+echo "→ Pushing staging to origin..."
+git push origin staging
+
+echo ""
+echo "✓ Merge complete. Deploy with: dev/run/deploy-staging"
+echo ""

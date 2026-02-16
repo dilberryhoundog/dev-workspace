@@ -1,0 +1,200 @@
+#!/bin/bash
+
+### Synchronises dev/branches/ archives between feature branch and command/main.
+# Pulls archives from command (or main) into current branch.
+# Pushes new archives from current branch to command (or main).
+# Usage: dev/run/update-archives [--pull-only | --push-only]
+
+set -e
+
+ARCHIVE_DIR="dev/branches"
+
+# Step 1: Get current branch and validate
+CURRENT_BRANCH=$(git branch --show-current)
+if [[ "$CURRENT_BRANCH" == "main" || "$CURRENT_BRANCH" == "master" || "$CURRENT_BRANCH" == "command" ]]; then
+    echo "❌ Cannot run from $CURRENT_BRANCH branch"
+    echo "   Run this from a feature branch to sync archives"
+    exit 1
+fi
+
+# Step 2: Determine source branch (command if exists, else main)
+SOURCE_BRANCH=""
+if git rev-parse --verify "command" >/dev/null 2>&1; then
+    SOURCE_BRANCH="command"
+elif git rev-parse --verify "main" >/dev/null 2>&1; then
+    SOURCE_BRANCH="main"
+elif git rev-parse --verify "master" >/dev/null 2>&1; then
+    SOURCE_BRANCH="master"
+else
+    echo "❌ No command, main, or master branch found"
+    exit 1
+fi
+
+# Step 3: Parse arguments
+PULL_ONLY=false
+PUSH_ONLY=false
+if [[ "$1" == "--pull-only" ]]; then
+    PULL_ONLY=true
+elif [[ "$1" == "--push-only" ]]; then
+    PUSH_ONLY=true
+fi
+
+echo ""
+echo "🔄 Update Archives"
+echo "   Current:  $CURRENT_BRANCH"
+echo "   Source:   $SOURCE_BRANCH"
+echo ""
+
+# Step 4: Get list of archives in source branch
+echo ""
+echo "🔍 Comparing archives..."
+
+# Archives in source branch (from git tree)
+SOURCE_ARCHIVES=()
+if git ls-tree -d --name-only "$SOURCE_BRANCH" -- "$ARCHIVE_DIR" >/dev/null 2>&1; then
+    while IFS= read -r archive; do
+        [[ -n "$archive" ]] && SOURCE_ARCHIVES+=("$(basename "$archive")")
+    done < <(git ls-tree -d --name-only "$SOURCE_BRANCH" -- "$ARCHIVE_DIR" 2>/dev/null)
+fi
+
+# Archives in current branch (from filesystem)
+CURRENT_ARCHIVES=()
+if [[ -d "$ARCHIVE_DIR" ]]; then
+    while IFS= read -r archive; do
+        [[ -n "$archive" ]] && CURRENT_ARCHIVES+=("$(basename "$archive")")
+    done < <(find "$ARCHIVE_DIR" -maxdepth 1 -mindepth 1 -type d 2>/dev/null)
+fi
+
+# Step 5: Find archives to pull (in source but not in current)
+TO_PULL=()
+for archive in "${SOURCE_ARCHIVES[@]}"; do
+    found=false
+    for current in "${CURRENT_ARCHIVES[@]}"; do
+        if [[ "$archive" == "$current" ]]; then
+            found=true
+            break
+        fi
+    done
+    if [[ "$found" == false ]]; then
+        TO_PULL+=("$archive")
+    fi
+done
+
+# Step 6: Find archives to push (in current but not in source)
+TO_PUSH=()
+for archive in "${CURRENT_ARCHIVES[@]}"; do
+    found=false
+    for source in "${SOURCE_ARCHIVES[@]}"; do
+        if [[ "$archive" == "$source" ]]; then
+            found=true
+            break
+        fi
+    done
+    if [[ "$found" == false ]]; then
+        TO_PUSH+=("$archive")
+    fi
+done
+
+# Step 7: Report findings
+echo ""
+echo "── Summary ─────────────────────────────"
+echo "   Archives in $SOURCE_BRANCH: ${#SOURCE_ARCHIVES[@]}"
+echo "   Archives in $CURRENT_BRANCH: ${#CURRENT_ARCHIVES[@]}"
+echo "   To pull from $SOURCE_BRANCH: ${#TO_PULL[@]}"
+echo "   To push to $SOURCE_BRANCH: ${#TO_PUSH[@]}"
+
+if [[ ${#TO_PULL[@]} -eq 0 && ${#TO_PUSH[@]} -eq 0 ]]; then
+    echo ""
+    echo "✓ Archives are already in sync"
+    exit 0
+fi
+
+# Step 8: Pull archives from source branch
+if [[ ${#TO_PULL[@]} -gt 0 && "$PUSH_ONLY" == false ]]; then
+    echo ""
+    echo "── Archives to pull ────────────────────"
+    for archive in "${TO_PULL[@]}"; do
+        echo "   📥 $archive"
+    done
+
+    echo ""
+    read -p "Pull ${#TO_PULL[@]} archive(s) from $SOURCE_BRANCH? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo ""
+        for archive in "${TO_PULL[@]}"; do
+            echo "📥 Pulling $archive..."
+            git checkout "$SOURCE_BRANCH" -- "$ARCHIVE_DIR/$archive"
+        done
+
+        # Commit pulled archives (unstage everything first, then stage only archives)
+        git reset HEAD -- . >/dev/null 2>&1 || true
+        git add "$ARCHIVE_DIR"
+        if ! git diff --cached --quiet; then
+            git commit -m "📥 pull archives from $SOURCE_BRANCH" \
+                       -m "Pulled ${#TO_PULL[@]} archive(s)"
+            echo "✓ Pulled and committed ${#TO_PULL[@]} archive(s)"
+        fi
+    else
+        echo "Pull skipped."
+    fi
+fi
+
+# Step 9: Push archives to source branch
+if [[ ${#TO_PUSH[@]} -gt 0 && "$PULL_ONLY" == false ]]; then
+    echo ""
+    echo "── Archives to push ────────────────────"
+    for archive in "${TO_PUSH[@]}"; do
+        echo "   📤 $archive"
+    done
+
+    echo ""
+    echo "⚠️  Pushing requires temporarily switching to $SOURCE_BRANCH"
+    read -p "Push ${#TO_PUSH[@]} archive(s) to $SOURCE_BRANCH? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo ""
+
+        # Store archives to push (copy paths)
+        ARCHIVE_PATHS=()
+        for archive in "${TO_PUSH[@]}"; do
+            ARCHIVE_PATHS+=("$ARCHIVE_DIR/$archive")
+        done
+
+        # Create a temporary commit message
+        PUSH_MSG="📤 push archives from $CURRENT_BRANCH"
+
+        # Switch to source branch
+        echo "🔄 Switching to $SOURCE_BRANCH..."
+        git checkout "$SOURCE_BRANCH"
+
+        # Checkout archives from feature branch
+        for archive in "${TO_PUSH[@]}"; do
+            echo "📤 Pushing $archive..."
+            git checkout "$CURRENT_BRANCH" -- "$ARCHIVE_DIR/$archive"
+        done
+
+        # Commit on source branch (unstage everything first, then stage only archives)
+        git reset HEAD -- . >/dev/null 2>&1 || true
+        git add "$ARCHIVE_DIR"
+        if ! git diff --cached --quiet; then
+            git commit -m "$PUSH_MSG" \
+                       -m "Pushed ${#TO_PUSH[@]} archive(s) from $CURRENT_BRANCH"
+            echo "✓ Committed ${#TO_PUSH[@]} archive(s) to $SOURCE_BRANCH"
+        fi
+
+        # Switch back to feature branch
+        echo ""
+        echo "🔄 Switching back to $CURRENT_BRANCH..."
+        git checkout "$CURRENT_BRANCH"
+
+        echo "✓ Pushed ${#TO_PUSH[@]} archive(s) to $SOURCE_BRANCH"
+    else
+        echo "Push skipped."
+    fi
+fi
+
+echo ""
+echo "═══════════════════════════════════════"
+echo "  ✓ Archive sync complete"
+echo "═══════════════════════════════════════"

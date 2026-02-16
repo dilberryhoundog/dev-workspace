@@ -1,0 +1,41 @@
+#!/bin/bash
+### Merge from staging to production and deploy.
+# Pull latest changes
+# Merge staging changes into main
+# Deploy using kamal
+
+set -e
+
+SERVER="root@46.224.112.91"
+PROD_DB="/var/lib/docker/volumes/bizzy_storage/_data/production.sqlite3"
+BACKUP_DB="/backups/bizzy/production-deploy-backup-$(date +%Y%m%d-%H%M%S).sqlite3"
+
+git switch staging
+
+echo ""
+echo "── Deploy to production ──"
+echo ""
+
+echo "→ Pulling latest staging..."
+git pull origin staging
+
+echo "→ Switching to main and pulling..."
+git switch main
+git pull origin main
+
+echo "→ Merging staging into main..."
+git merge staging --no-edit
+git push origin main
+
+echo "→ Backing up production database..."
+ssh "$SERVER" "sqlite3_rsync $PROD_DB $BACKUP_DB"
+
+echo "→ Deploying to production..."
+kamal deploy
+
+echo "→ Switching back to staging..."
+git switch staging
+
+echo ""
+echo "✓ Production deployed at bizzy.grahams.coffee"
+echo ""

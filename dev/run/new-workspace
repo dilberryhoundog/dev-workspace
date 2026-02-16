@@ -1,0 +1,129 @@
+#!/bin/bash
+
+### Creates new branch from parent (main or command).
+# Validates sync status with remote before branching.
+# Usage: dev/run/new-branch <branch-name>
+
+set -e
+
+BRANCH_NAME="$1"
+
+if [[ -z "$BRANCH_NAME" ]]; then
+    echo "❌ Usage: dev/run/new-branch <branch-name>"
+    echo "   Example: dev/run/new-branch feature/add-login"
+    exit 1
+fi
+
+# Step 1: Get current branch
+CURRENT_BRANCH=$(git branch --show-current)
+
+# Step 2: Must be on main or command
+if [[ "$CURRENT_BRANCH" != "main" && "$CURRENT_BRANCH" != "command" ]]; then
+    echo "❌ Must be on 'main' or 'command' branch"
+    echo "   Currently on: $CURRENT_BRANCH"
+    echo "   Run: git checkout main  OR  git checkout command"
+    exit 1
+fi
+
+# Step 3: Detect remote and validate expected
+ACTUAL_REMOTE=$(git config --get "branch.$CURRENT_BRANCH.remote" 2>/dev/null || echo "")
+if [[ "$CURRENT_BRANCH" == "main" ]]; then
+    EXPECTED_REMOTE="origin"
+else
+    EXPECTED_REMOTE="fork"
+fi
+
+if [[ -z "$ACTUAL_REMOTE" ]]; then
+    echo "⚠️  Branch '$CURRENT_BRANCH' has no upstream remote configured"
+    read -p "Continue anyway? [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+    REMOTE="$EXPECTED_REMOTE"
+elif [[ "$ACTUAL_REMOTE" != "$EXPECTED_REMOTE" ]]; then
+    echo "⚠️  Unexpected remote for $CURRENT_BRANCH"
+    echo "   Expected: $EXPECTED_REMOTE"
+    echo "   Actual:   $ACTUAL_REMOTE"
+    read -p "Continue with '$ACTUAL_REMOTE'? [y/N] " -n 1 -r
+    echo
+    [[ $REPLY =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+    REMOTE="$ACTUAL_REMOTE"
+else
+    REMOTE="$ACTUAL_REMOTE"
+fi
+
+echo "🌿 Create new branch"
+echo "   Name: $BRANCH_NAME"
+echo "   From: $CURRENT_BRANCH (local)"
+echo ""
+
+# Step 4: Check working tree is clean
+if [[ -n $(git status --porcelain) ]]; then
+    echo "❌ Working tree is not clean"
+    echo "   Commit or stash changes first"
+    echo ""
+    git status --short
+    exit 1
+fi
+echo "✓ Working tree is clean"
+
+# Step 5: Fetch and check sync status
+echo ""
+echo "🔄 Checking remote sync..."
+if git fetch "$REMOTE" "$CURRENT_BRANCH" 2>/dev/null; then
+    UPSTREAM="$REMOTE/$CURRENT_BRANCH"
+
+    AHEAD=$(git rev-list --count "$UPSTREAM"..HEAD)
+    BEHIND=$(git rev-list --count HEAD.."$UPSTREAM")
+
+    if [[ "$BEHIND" -gt 0 ]]; then
+        echo "⚠️  Local $CURRENT_BRANCH is $BEHIND commit(s) behind $UPSTREAM"
+        if [[ "$AHEAD" -gt 0 ]]; then
+            echo "   Also $AHEAD commit(s) ahead (diverged)"
+        fi
+        echo ""
+        read -p "Continue branching from local? [y/N] " -n 1 -r
+        echo
+        [[ $REPLY =~ ^[Yy]$ ]] || { echo "Aborted. Run: git pull $REMOTE $CURRENT_BRANCH"; exit 0; }
+    elif [[ "$AHEAD" -gt 0 ]]; then
+        echo "✓ Local has $AHEAD unpushed commit(s) - branching will include them"
+    else
+        echo "✓ In sync with $UPSTREAM"
+    fi
+else
+    echo "⚠️  Could not fetch $REMOTE/$CURRENT_BRANCH (remote may not exist)"
+    echo "   Continuing with local branch"
+fi
+
+# Step 6: Check if branch already exists
+if git rev-parse --verify "$BRANCH_NAME" >/dev/null 2>&1; then
+    echo ""
+    echo "⚠️  Branch '$BRANCH_NAME' already exists locally"
+    read -p "Switch to existing branch? [y/N] " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        git checkout "$BRANCH_NAME"
+        echo ""
+        echo "✓ Switched to existing branch: $BRANCH_NAME"
+        exit 0
+    else
+        echo "Aborted."
+        exit 1
+    fi
+fi
+
+# Step 7: Create branch
+echo ""
+read -p "Create branch '$BRANCH_NAME' from $CURRENT_BRANCH? [y/N] " -n 1 -r
+echo
+[[ $REPLY =~ ^[Yy]$ ]] || { echo "Aborted."; exit 0; }
+
+git checkout -b "$BRANCH_NAME" --no-track "$CURRENT_BRANCH"
+
+echo ""
+echo "═══════════════════════════════════════"
+echo "  ✓ Created branch: $BRANCH_NAME"
+echo "═══════════════════════════════════════"
+echo ""
+echo "Next steps:"
+echo "  • Make commits on this branch"
+echo "  • Push when ready: dev/run/push-branch"

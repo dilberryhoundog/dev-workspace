@@ -1,0 +1,15 @@
+#!/bin/bash
+### Start the application using kamal commands
+
+set -e
+
+echo ""
+echo "── Boot staging ──"
+echo ""
+
+echo "→ Starting staging application..."
+kamal app boot -d staging
+
+echo ""
+echo "✓ Staging application started."
+echo ""

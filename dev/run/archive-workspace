@@ -1,0 +1,69 @@
+#!/bin/bash
+
+### Archives workspace to dev/branches/ using branch name.
+# Creates or updates archive at stable path (no date prefix).
+# Usage: dev/run/archive-workspace
+
+set -e
+
+WORKSPACE_DIR="dev/workspace"
+ARCHIVE_BASE="dev/branches"
+
+# Step 1: Validate workspace exists
+if [[ ! -d "$WORKSPACE_DIR" ]]; then
+    echo "❌ No workspace found at $WORKSPACE_DIR"
+    exit 1
+fi
+
+# Step 2: Get and parse branch name
+BRANCH=$(git branch --show-current)
+
+# Match either type/description or just description
+if [[ "$BRANCH" =~ ^(([^/]+)/)?(.+)$ ]]; then
+    BRANCH_TYPE="${BASH_REMATCH[2]}"
+    BRANCH_DESC="${BASH_REMATCH[3]}"
+else
+    echo "❌ Could not parse branch name: $BRANCH"
+    exit 1
+fi
+
+# Generate archive name from branch (stable path, no date)
+if [[ -n "$BRANCH_TYPE" ]]; then
+    ARCHIVE_NAME="${BRANCH_TYPE}_${BRANCH_DESC}"
+    COMMIT_DESC="${BRANCH_TYPE}/${BRANCH_DESC}"
+else
+    ARCHIVE_NAME="${BRANCH_DESC}"
+    COMMIT_DESC="${BRANCH_DESC}"
+fi
+
+ARCHIVE_PATH="${ARCHIVE_BASE}/${ARCHIVE_NAME}"
+
+# Step 4: Create archive directory and sync
+mkdir -p "$ARCHIVE_PATH"
+rsync -av --delete "$WORKSPACE_DIR/" "$ARCHIVE_PATH/"
+
+echo ""
+echo "✓ Archived: $ARCHIVE_PATH/"
+echo "✓ Workspace remains active on branch"
+
+# Step 5: Git operations - stage and commit archive
+echo ""
+echo "📝 Staging archive files..."
+
+# Unstage everything first
+git reset HEAD -- . >/dev/null 2>&1 || true
+
+# Stage only archive files
+git add "$ARCHIVE_PATH"
+
+# Check if there are staged changes
+if git diff --cached --quiet; then
+    echo "ℹ No changes to archive - already up to date"
+else
+    echo "📝 Committing archive..."
+    git commit -m "📦 archive workspace: ${COMMIT_DESC}"
+    echo "✓ Archive committed"
+fi
+
+echo ""
+echo "Done! Archive is at: $ARCHIVE_PATH/"

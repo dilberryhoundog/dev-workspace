@@ -1,0 +1,20 @@
+#!/bin/bash
+### Refresh staging database from production
+# Run before deploying to staging to test migrations against real data
+
+set -e
+
+SERVER="root@46.224.112.91"
+PROD_DB="/var/lib/docker/volumes/bizzy_storage/_data/production.sqlite3"
+STAGING_DB="/var/lib/docker/volumes/bizzy_staging_storage/_data/production.sqlite3"
+
+echo ""
+echo "── Refresh staging database ──"
+echo ""
+
+echo "→ Copying production database to staging..."
+ssh "$SERVER" "sqlite3_rsync $PROD_DB $STAGING_DB"
+
+echo ""
+echo "✓ Staging now has fresh production data."
+echo ""

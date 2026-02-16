@@ -1,0 +1,115 @@
+#!/bin/bash
+
+### Syncs the command branch with pristine main (merges main → command).
+# Safety: Requires clean working tree. Fetches origin/main first.
+# Usage: dev/run/sync-command [--ff]
+#   --ff  Allow fast-forward (default is --no-ff for explicit merge commit)
+
+set -e
+
+TARGET_BRANCH="command"
+SOURCE_BRANCH="main"
+REMOTE="origin"
+
+# Step 1: Parse args
+USE_NO_FF=true
+for arg in "$@"; do
+    case $arg in
+        --ff)
+            USE_NO_FF=false
+            ;;
+    esac
+done
+
+echo "🔄 Sync command branch with main"
+echo "   Source: $SOURCE_BRANCH"
+echo "   Target: $TARGET_BRANCH"
+echo "   Method: $([ "$USE_NO_FF" == true ] && echo "merge (--no-ff)" || echo "merge (allow ff)")"
+echo ""
+
+# Step 2: Must be on command branch
+CURRENT_BRANCH=$(git branch --show-current)
+if [[ "$CURRENT_BRANCH" != "$TARGET_BRANCH" ]]; then
+    echo "❌ Must be on $TARGET_BRANCH branch"
+    echo "   Current branch: $CURRENT_BRANCH"
+    echo "   Run: git checkout $TARGET_BRANCH"
+    exit 1
+fi
+echo "✓ On $TARGET_BRANCH branch"
+
+# Step 3: Working tree must be clean
+if [[ -n $(git status --porcelain) ]]; then
+    echo "❌ Working tree is not clean"
+    echo "   Commit or stash changes before running this script"
+    echo ""
+    git status --short
+    exit 1
+fi
+echo "✓ Working tree is clean"
+
+# Step 4: Fetch origin
+echo ""
+echo "📡 Fetching $REMOTE..."
+git fetch "$REMOTE" "$SOURCE_BRANCH"
+
+# Step 5: Check if main exists locally and is up to date with origin
+if ! git rev-parse --verify "$SOURCE_BRANCH" >/dev/null 2>&1; then
+    echo "❌ Local $SOURCE_BRANCH branch does not exist"
+    echo "   Run: git checkout $SOURCE_BRANCH && git pull"
+    exit 1
+fi
+
+# Check if local main is behind origin/main
+LOCAL_MAIN=$(git rev-parse "$SOURCE_BRANCH")
+REMOTE_MAIN=$(git rev-parse "$REMOTE/$SOURCE_BRANCH")
+if [[ "$LOCAL_MAIN" != "$REMOTE_MAIN" ]]; then
+    echo "⚠️  Local $SOURCE_BRANCH is not in sync with $REMOTE/$SOURCE_BRANCH"
+    echo "   Run: dev/run/pull-to-pristine-main"
+    echo ""
+    echo "   Local:  $(git log -1 --oneline $SOURCE_BRANCH)"
+    echo "   Remote: $(git log -1 --oneline $REMOTE/$SOURCE_BRANCH)"
+    exit 1
+fi
+echo "✓ Local $SOURCE_BRANCH is in sync with $REMOTE"
+
+# Step 6: Check if already up to date
+BEHIND=$(git rev-list --count HEAD.."$SOURCE_BRANCH")
+if [[ "$BEHIND" -eq 0 ]]; then
+    echo ""
+    echo "✓ Already up to date with $SOURCE_BRANCH"
+    exit 0
+fi
+
+echo ""
+echo "📊 $BEHIND commit(s) to merge from $SOURCE_BRANCH"
+echo ""
+echo "Recent commits to merge:"
+git log --oneline HEAD.."$SOURCE_BRANCH" | head -5
+TOTAL=$(git rev-list --count HEAD.."$SOURCE_BRANCH")
+if [[ "$TOTAL" -gt 5 ]]; then
+    echo "   ... and $((TOTAL - 5)) more"
+fi
+
+# Step 7: Confirm and merge
+echo ""
+read -p "Merge $SOURCE_BRANCH into $TARGET_BRANCH? [y/N] " -n 1 -r
+echo
+[[ $REPLY =~ ^[Yy]$ ]] || { echo "Merge aborted."; exit 0; }
+
+echo ""
+echo "🔄 Merging $SOURCE_BRANCH into $TARGET_BRANCH..."
+if [[ "$USE_NO_FF" == true ]]; then
+    git merge "$SOURCE_BRANCH" --no-ff -m "🔀 sync: merge main into command"
+else
+    git merge "$SOURCE_BRANCH" -m "🔀 sync: merge main into command"
+fi
+
+echo ""
+echo "═══════════════════════════════════════"
+echo "  ✓ $TARGET_BRANCH synced with $SOURCE_BRANCH"
+echo "═══════════════════════════════════════"
+echo ""
+echo "Latest commit:"
+git log -1 --oneline
+echo ""
+echo "To push: git push $REMOTE $TARGET_BRANCH"

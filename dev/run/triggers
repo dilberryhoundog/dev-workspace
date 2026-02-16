@@ -1,0 +1,31 @@
+#!/bin/bash
+
+### Lists available chat triggers for Claude Code hook system.
+
+HANDLER_DIR=".claude/hooks/handlers/user_prompt_submit"
+
+echo ""
+echo "Chat triggers (use these phrases in your Claude Code prompt)"
+echo "──────────────────────────────────────────────────────────────"
+echo ""
+
+for file in "$HANDLER_DIR"/*.rb; do
+    [[ -f "$file" ]] || continue
+
+    # Extract ### comment line (first occurrence)
+    desc_line=$(grep -m1 "^### " "$file" 2>/dev/null | sed 's/^### //')
+    [[ -z "$desc_line" ]] && continue
+
+    # Split on " - " to get name and description
+    name=$(echo "$desc_line" | sed 's/ - .*//')
+    desc=$(echo "$desc_line" | sed 's/^[^-]*- //')
+
+    # Extract trigger phrases from the triggers array
+    phrases=$(grep -m1 'triggers = \[' "$file" 2>/dev/null \
+        | sed 's/.*\[//; s/\].*//' \
+        | sed 's/"//g; s/,  */, /g; s/^ *//; s/ *$//')
+
+    printf "  %-20s %s\n" "$name" "$desc"
+    printf "  %-20s %s\n" "" "say: $phrases"
+    echo ""
+done

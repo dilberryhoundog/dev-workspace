@@ -1,0 +1,94 @@
+#!/bin/bash
+### Health check for apps, branches, and server
+
+SERVER="root@46.224.112.91"
+BACKUP_DIR="/backups/bizzy"
+
+echo ""
+echo "── Health Check ──"
+
+# --- Apps ---
+
+echo ""
+echo "Apps"
+echo ""
+
+echo -n "→ Production: "
+PROD_STATUS=$(kamal app details -q 2>/dev/null | sed -n 's/.*Up \([0-9]* [a-z]*\).*/\1/p' | head -1)
+if [ -n "$PROD_STATUS" ]; then
+  echo "up (${PROD_STATUS#Up })"
+else
+  echo "down"
+fi
+
+echo -n "→ Staging:    "
+STAGING_STATUS=$(kamal app details -q -d staging 2>/dev/null | sed -n 's/.*Up \([0-9]* [a-z]*\).*/\1/p' | head -1)
+if [ -n "$STAGING_STATUS" ]; then
+  echo "up (${STAGING_STATUS#Up })"
+else
+  echo "stopped"
+fi
+
+# --- Branches ---
+
+echo ""
+echo "Branches"
+echo ""
+
+git fetch origin staging command-mirror --quiet 2>/dev/null
+
+echo -n "→ staging:         "
+AHEAD=$(git rev-list origin/staging..staging --count 2>/dev/null)
+BEHIND=$(git rev-list staging..origin/staging --count 2>/dev/null)
+if [[ "$AHEAD" -eq 0 && "$BEHIND" -eq 0 ]]; then
+  echo "in sync with origin"
+else
+  STATUS=""
+  [[ "$AHEAD" -gt 0 ]] && STATUS="${AHEAD} ahead"
+  [[ "$BEHIND" -gt 0 ]] && STATUS="${STATUS:+$STATUS, }${BEHIND} behind"
+  echo "$STATUS"
+fi
+
+echo -n "→ command-mirror:  "
+MIRROR_HEAD=$(git rev-parse origin/command-mirror 2>/dev/null)
+MERGE_BASE=$(git merge-base staging origin/command-mirror 2>/dev/null)
+if [[ "$MERGE_BASE" == "$MIRROR_HEAD" ]]; then
+  echo "merged into staging"
+else
+  UNMERGED=$(git rev-list staging..origin/command-mirror --count 2>/dev/null)
+  echo "${UNMERGED} commits not yet merged"
+fi
+
+# --- Server ---
+
+echo ""
+echo "Server ($SERVER)"
+echo ""
+
+echo "→ Disk:"
+ssh -o ConnectTimeout=5 "$SERVER" "df -h / | tail -1 | awk '{printf \"  %s used of %s (%s free)\n\", \$3, \$2, \$4}'" 2>/dev/null || echo "  connection failed"
+
+echo "→ Backups:"
+ssh -o ConnectTimeout=5 "$SERVER" "
+  if [ -d $BACKUP_DIR ]; then
+    HOURLY=\$(ls -1 $BACKUP_DIR/production-*.sqlite3 2>/dev/null | wc -l | tr -d ' ')
+    DAILY=\$(ls -1 $BACKUP_DIR/daily-*.sqlite3 2>/dev/null | wc -l | tr -d ' ')
+    LATEST=\$(ls -1t $BACKUP_DIR 2>/dev/null | head -1)
+    echo \"  \${HOURLY} hourly, \${DAILY} daily\"
+    [ -n \"\$LATEST\" ] && echo \"  latest: \$LATEST\"
+  else
+    echo \"  no backup directory found\"
+  fi
+" 2>/dev/null || echo "  connection failed"
+
+echo "→ Cron:"
+ssh -o ConnectTimeout=5 "$SERVER" "
+  CRON=\$(crontab -l 2>/dev/null | grep -v '^#' | grep -v '^\$')
+  if [ -n \"\$CRON\" ]; then
+    echo \"\$CRON\" | while read -r line; do echo \"  \$line\"; done
+  else
+    echo \"  no crontab configured\"
+  fi
+" 2>/dev/null || echo "  connection failed"
+
+echo ""

@@ -1,9 +1,10 @@
 #!/bin/bash
-# Pushes current branch to remote with safety checks.
+
+### Pushes current branch to remote with safety checks.
 # Prevents pushing directly to parent branches.
 # Reads remote from WORKSPACE.md.
-# Usage: dev/run/push-branch [--force]
-#   --force  Force push (use with caution)
+# Usage: dev/run/push-branch
+
 
 set -e
 
@@ -23,7 +24,7 @@ PARENT_BRANCH="${PARENT_BRANCH:-main}"
 CURRENT_BRANCH=$(git branch --show-current)
 
 # Step 3: Safety check - prevent pushing to protected branches
-PROTECTED_BRANCHES="main master command $PARENT_BRANCH"
+PROTECTED_BRANCHES="main master"
 for branch in $PROTECTED_BRANCHES; do
     if [[ "$CURRENT_BRANCH" == "$branch" ]]; then
         echo "❌ Cannot push directly to $CURRENT_BRANCH"
@@ -32,35 +33,63 @@ for branch in $PROTECTED_BRANCHES; do
     fi
 done
 
-# Step 4: Parse args
-FORCE_FLAG=""
-if [[ "$1" == "--force" ]]; then
-    FORCE_FLAG="--force-with-lease"
-    echo "⚠️  Force push requested (using --force-with-lease for safety)"
-    echo ""
-fi
-
 echo "📤 Push branch"
 echo "   Branch: $CURRENT_BRANCH"
 echo "   Remote: $REMOTE"
 echo ""
 
-# Step 5: Check if there's anything to push
+# Step 4: Check remote status and determine if force is needed
 git fetch "$REMOTE" >/dev/null 2>&1
 
 UPSTREAM="$REMOTE/$CURRENT_BRANCH"
+FORCE_NEEDED=false
+NEW_BRANCH=false
+
 if git rev-parse --verify "$UPSTREAM" >/dev/null 2>&1; then
     AHEAD=$(git rev-list --count "$UPSTREAM"..HEAD)
-    if [[ "$AHEAD" -eq 0 && -z "$FORCE_FLAG" ]]; then
+    BEHIND=$(git rev-list --count HEAD.."$UPSTREAM")
+
+    if [[ "$AHEAD" -eq 0 && "$BEHIND" -eq 0 ]]; then
         echo "✓ Already up to date with $REMOTE"
         exit 0
     fi
-    echo "   $AHEAD commit(s) to push"
+
+    if [[ "$BEHIND" -gt 0 ]]; then
+        FORCE_NEEDED=true
+        echo "   ⚠️  History has diverged from remote"
+        echo "   Local is $AHEAD ahead, $BEHIND behind $UPSTREAM"
+        echo "   (likely due to rebase, amend, or reset)"
+    else
+        echo "   $AHEAD commit(s) to push"
+    fi
 else
+    NEW_BRANCH=true
     echo "   New branch (will set upstream)"
 fi
 
-# Step 6: Push
+# Step 5: Handle force push confirmation if needed
+FORCE_FLAG=""
+if [[ "$FORCE_NEEDED" == true ]]; then
+    echo ""
+    read -p "Force push required. Overwrite remote and continue? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Push aborted."
+        exit 0
+    fi
+    FORCE_FLAG="--force-with-lease"
+fi
+
+# Step 6: Confirmation gate
+echo ""
+read -p "Push to $REMOTE/$CURRENT_BRANCH? [y/N] " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Push aborted."
+    exit 0
+fi
+
+# Step 7: Push
 echo ""
 echo "🔄 Pushing to $REMOTE..."
 if [[ -n "$FORCE_FLAG" ]]; then

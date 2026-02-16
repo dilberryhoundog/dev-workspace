@@ -1,0 +1,15 @@
+#!/bin/bash
+### Stop the application using kamal commands
+
+set -e
+
+echo ""
+echo "── Stop staging ──"
+echo ""
+
+echo "→ Stopping staging application..."
+kamal app stop -d staging
+
+echo ""
+echo "✓ Staging application stopped."
+echo ""
