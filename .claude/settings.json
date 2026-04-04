@@ -16,16 +16,11 @@
       "Bash(rails:*)",
       "Bash(bundle:*)",
       "Bash(rake:*)",
-      "SlashCommand(/css:*)",
-      "SlashCommand(/issue:*)",
-      "SlashCommand(/pr:*)",
-      "SlashCommand(/ruby_scratchpad:*)",
-      "SlashCommand(/html_scratchpad:*)",
-      "SlashCommand(/cleanup:*)",
-      "SlashCommand(/record_feature)",
-      "Skill(test)",
-      "Skill(gh-cli)",
-      "Skill(git)"
+      "Bash(dev-workspace:*)",
+      "Skill(dev-workspace)",
+      "Skill(openclaw-docs)",
+      "Skill(conversation-capture)",
+      "Skill(magic-reply)"
     ],
     "deny": [
       "Read(./.env)",
@@ -59,17 +54,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/entrypoints/session_start.rb"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
+            "command": "dev-workspace"
+          },
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/entrypoints/user_prompt_submit.rb"
+            "command": "dev-workspace tree"
           }
         ]
       }
@@ -79,13 +68,14 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/entrypoints/session_end.rb"
+            "command": "dev-workspace tree"
           }
         ]
       }
     ]
   },
   "outputStyle": "default",
+  "plansDirectory": "./dev/workspace/plans",
   "sandbox": {
     "enabled": false,
     "autoAllowBashIfSandboxed": true,

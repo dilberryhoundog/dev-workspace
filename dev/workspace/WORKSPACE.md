@@ -1,43 +1,40 @@
----
-remote: origin
-parent_branch: main
----
+# WORKSPACE.md
 
-# Workspace Management & Configuration
+Branch workspace context for Claude and humans. Not read by the dev-workspace script.
 
-This file guides Claude through the operational constraints applicable to this workspace.
+*Load into Claude's context with: `@dev/workspace/WORKSPACE.md`*
+
+## Branch
+
+**Name:**
+**Started:**
+**Status:**
+
+- [ ] In Progress
+- [ ] Discard (workspace and branch abandoned)
+- [ ] Complete (ready to merge)
+
+## Purpose
+
+%% Claude: write a brief purpose statement when creating the workspace %%
+
+## Workflow
+
+- [ ] Quick (direct implementation)
+- [ ] Single plan (plan once, execute)
+- [ ] Multi-stage plan (iterative planning)
 
 ## Track Issues
 
 - [ ] Track GitHub issues
     - <!-- Add issue numbers: #123, #456 -->
 
-## Merge Strategy
-
-_Default: Full history merge_
-
-- [ ] Squash merge
-- [ ] Rebase merge
-
-## Post-Merge
-
-- [ ] Delete branch after merge
-- [x] Archive workspace upon merge
-  > **Archive Instructions:**
-  > run the `/archive-workspace` SlashCommand Tool before merging the Branch.
-
-## Workflow Type
-
-- [ ] Quick (direct implementation)
-- [ ] Single plan (plan once, execute)
-- [ ] Multi-stage plan (iterative planning)
-
 ## Testing
 
 - [ ] Requires testing
   > Update relevant tests as per testing strategy. All tests must pass before PR.
 
-## Plans currently available
+## Plans
 
 If selected please read the file at the start of the session before starting work
 
@@ -45,4 +42,6 @@ If selected please read the file at the start of the session before starting wor
 - [ ] `dev/workspace/plans/architecture.md`
 - [ ] `dev/workspace/context/discover.md`
 
----
+## Discoveries
+
+- %% Claude: record discoveries here as you work %%
