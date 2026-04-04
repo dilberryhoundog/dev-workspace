@@ -6,33 +6,31 @@ Merge deployable code into the staging branch and deploy via Kamal.
 
 ## Sequence
 
-1. **Check state**: `dev-deploy stage --check` — shows how many commits need merging
+1. **Preflight**: `dev-deploy stage --check` — verifies source is in sync with origin, shows commits to merge
 2. **Stage**: `dev-deploy stage` — merges source into staging branch, pushes to origin
 3. **Optional DB refresh**: `dev-deploy deploy staging --refresh-db` — refreshes staging DB from production before deploying
 4. **Deploy**: `dev-deploy deploy staging` — pulls latest staging, runs pre_deploy hook, deploys via Kamal, runs post_deploy hook
 
-## Remote Pattern (Fork Repos)
+## Source Branch
 
-Source is a mirror branch pushed from a fork via `dev-workspace deploy push`:
+`source.branch` in config points to a local branch with deployable code (typically `main`). Before staging, this branch must be in sync with its origin counterpart. The `stage` command checks this and fails if there's a mismatch — push or pull your source branch first.
 
-```
-fork repo → dev-workspace deploy push → mirror branch (origin/command-mirror)
-         → dev-deploy stage → merges mirror into staging
-         → dev-deploy deploy staging → kamal deploy -d staging
-```
-
-The `stage` command fetches the remote branch configured in `source.remote` before merging.
-
-## Local Pattern (Vanilla Repos)
-
-Source is a branch in the same repo (usually `main`):
+For dual-repo setups (fork → deploy repo), `dev-workspace deploy push` sends code to the deploy repo. Pull the receiving branch locally so it matches origin, then stage as normal.
 
 ```
-main branch → dev-deploy stage → merges main into staging
-           → dev-deploy deploy staging → kamal deploy -d staging
+source branch (in sync with origin) → dev-deploy stage → staging branch
+                                    → dev-deploy deploy staging → kamal deploy
 ```
 
-No fetch needed — direct merge from local branch.
+## Preflight (--check)
+
+`stage --check` reports:
+
+- Is source branch in sync with origin? (required for staging to proceed)
+- How many commits will be merged into staging?
+- Recent commits to be merged
+
+Always run `--check` before staging. If source is out of sync, the check tells you whether to push or pull.
 
 ## Merge Conflicts
 

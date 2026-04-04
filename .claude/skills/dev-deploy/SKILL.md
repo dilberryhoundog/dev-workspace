@@ -1,6 +1,6 @@
 ---
 name: dev-deploy
-description: Manage deployment pipelines for projects using Kamal. Use instead of raw kamal/git commands when a project contains dev/deploy/deploy-config.yml. Handles staging merges, production promotion, DB operations via hooks, health checks, and Kamal orchestration. Supports remote deploy (fork repos with mirror branches) and local deploy (staging/production branches in same repo). Every command supports --check for safe inspection before execution.
+description: Manage deployment pipelines for projects using Kamal. Use instead of raw kamal/git commands when a project contains dev/deploy/deploy-config.yml. Handles staging merges, production promotion, DB operations via hooks, health checks, and Kamal orchestration. Every command supports --check for safe inspection before execution.
 tools:
   - exec
 ---
@@ -46,13 +46,11 @@ dev-deploy health                    # Full health check (apps, branches, server
 
 **Always run `--check` before any deploy command.** Read the output. Reason about whether to proceed. Never blindly execute.
 
-## Deploy Patterns
+## How Staging Works
 
-**Remote (fork repos):** Code develops in a fork → `dev-workspace deploy push` sends to mirror branch in deploy repo → `dev-deploy stage` merges mirror into staging → `dev-deploy deploy staging` deploys via Kamal.
+`source.branch` in config points to a local branch containing deployable code. Before staging, this branch must be in sync with origin. `stage --check` verifies readiness, `stage` fails if not in sync.
 
-**Local (vanilla repos):** Development on main/feature branches → `dev-deploy stage` merges main into staging → `dev-deploy deploy staging` deploys via Kamal. No separate deploy repo needed.
-
-The config determines which pattern is active. If `source.remote` is set, it's remote. If commented out, it's local.
+For dual-repo setups (fork → deploy repo), `dev-workspace deploy push` sends code to the deploy repo's receiving branch. Pull that branch locally, then stage as normal — dev-deploy doesn't need to know where the commits came from.
 
 ## Hooks
 
@@ -77,7 +75,8 @@ Lives at `dev/deploy/deploy-config.yml`. Comment out sections to disable feature
 `dev-workspace` handles the **git workflow** (branches, merging, archiving).
 `dev-deploy` handles the **infrastructure** (Kamal, staging, production, DB ops).
 
-The handoff: `dev-workspace deploy push` → mirror branch → `dev-deploy stage` → `dev-deploy deploy`.
+For dual-repo setups: `dev-workspace deploy push` → receiving branch → pull locally → `dev-deploy stage` → `dev-deploy deploy`.
+For single-repo setups: `dev-deploy stage` → `dev-deploy deploy` (no deploy push needed).
 
 ## References
 

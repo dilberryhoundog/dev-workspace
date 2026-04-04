@@ -10,7 +10,9 @@ Pulls parent branch changes into the current feature branch.
 ```
 dev-workspace sync --check               # How far behind parent?
 dev-workspace sync                       # Merge parent into feature branch
+dev-workspace sync --full                # Bare merge — no workspace file protection
 dev-workspace sync --rebase              # Rebase onto parent (cleaner history)
+dev-workspace sync --continue            # Complete sync after resolving conflicts
 ```
 
 ### When to Sync
@@ -22,11 +24,27 @@ dev-workspace sync --rebase              # Rebase onto parent (cleaner history)
 - **Merge** (default): Creates a merge commit. History shows when sync happened. No force push needed.
 - **Rebase** (`--rebase`): Replays your commits on top of parent. Cleaner linear history. Requires `dev-workspace push --force-w-l` afterwards because commit hashes change.
 
+### Workspace Protection During Sync
+
+During sync, workspace files (configured in `workspace_protection.directories`) are automatically preserved. This prevents "phantom deletions" — where git sees files missing from the parent branch and removes them from the feature branch.
+
+The protection works by:
+1. Running the merge with `--no-commit`
+2. Checking if any files in protected paths were deleted
+3. Restoring only the deleted files from the branch's own commit
+4. Committing the merge
+
+Modifications and new files from the parent flow through normally — only deletions are blocked. This allows config updates, new templates, and other legitimate changes from the parent to propagate to feature branches.
+
+**Rebase limitation:** `--rebase` mode cannot protect workspace files because rebase replays commits one at a time without a staging area to intercept. If workspace files are affected during rebase, manual restoration is needed.
+
 ### Conflict Handling
-If conflicts occur during sync, the command outputs the conflicting files. The agent should:
+If conflicts occur during sync, the command outputs the conflicting files and a hint to use `--continue`. The agent should:
 1. Report the conflicts to the user
 2. Help resolve them if asked
-3. Complete the merge/rebase after resolution
+3. Run `dev-workspace sync --continue` to complete the merge after resolution
+
+`--continue` validates that a merge is in progress and all conflicts are resolved before committing. Workspace protection is applied before the final commit.
 
 ---
 
@@ -64,15 +82,16 @@ The `upstream_latest_to` config key controls which branch gets reset. Set to `fa
 
 ---
 
-## dev-workspace merge-latest — Command Branch Sync
+## dev-workspace transfer-latest — Command Branch Sync
 
 Merges `main_branch` into `parent_branch`. Only meaningful for fork repos where these are different branches (e.g. main → command).
 
 ### Workflow
 ```
-dev-workspace merge-latest --check       # Verify main is current, see incoming commits
-dev-workspace merge-latest               # Merge main → parent (no-ff by default)
-dev-workspace merge-latest --ff          # Allow fast-forward merge
+dev-workspace transfer-latest --check       # Verify main is current, see incoming commits
+dev-workspace transfer-latest               # Merge main → parent (no-ff by default)
+dev-workspace transfer-latest --ff          # Allow fast-forward merge
+dev-workspace transfer-latest --continue    # Complete merge after resolving conflicts
 ```
 
 ### Self-Guarding
@@ -99,7 +118,7 @@ dev-workspace latest --upstream
 
 # 2. Update command branch from main
 git checkout command
-dev-workspace merge-latest
+dev-workspace transfer-latest
 
 # 3. Update feature branches from command
 git checkout feature/my-work

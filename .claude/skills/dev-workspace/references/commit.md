@@ -14,6 +14,7 @@ dev-workspace commit                     # Commit workspace files only
 3. **Commits with configured message** — reads `commit_workspace.message` from config
 
 Default directories staged:
+
 - `dev/workspace`
 - `.claude/config/`
 - `.gitattributes`

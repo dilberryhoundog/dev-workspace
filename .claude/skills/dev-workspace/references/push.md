@@ -25,18 +25,21 @@ Any local branch pushes to its matching origin branch: `feature/login` pushes to
 `dev-workspace push --force-w-l` uses `git push --force-with-lease`. This is a safe force push — it only overwrites the remote if nobody else has pushed since your last fetch.
 
 **When force push is appropriate:**
+
 - After `dev-workspace sync --rebase` (rebasing rewrites history)
 - After `git commit --amend` (amending changes the commit hash)
 - After `git rebase -i` (interactive rebase)
 - After any operation that rewrites commit history
 
 **When force push is NOT appropriate:**
+
 - On shared branches where others are actively pushing
 - When you haven't fetched recently (run `push --check` first)
 
 ## Safety
 
 No artificial branch protection. Both fork and vanilla repos push to origin safely. Standard git protection applies:
+
 - Push is rejected if remote is ahead (pull first or force)
 - `--force-with-lease` fails if remote has changed since last fetch
 

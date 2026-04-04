@@ -4,80 +4,72 @@
 # Created by: dev-deploy init
 #
 # Machine-read by the dev-deploy script. Drives all deployment automation.
-# Comment out sections to disable features. No boolean gates needed.
-#
-# Two deploy patterns supported:
-#   Remote:  Code pushed to a separate deploy repo, then staged/deployed from there
-#   Local:   Staging and production branches live in the same repo as development
+# Comment out sections to disable features.
 
 # ==============================================================================
-# DEPLOY SOURCE
+# SOURCE
 # ==============================================================================
-# Where deployable code comes from.
-#
-# Remote pattern (fork): dev-workspace deploy push → mirror branch in deploy repo
-# Local pattern (vanilla): merge directly from main/development branch
+# The local branch containing deployable code.
+# Must be in sync with origin before staging can proceed.
+# For deploy-only repos: this is the branch that receives deploy pushes.
+# For vanilla repos: typically main.
 
 source:
-  branch: # command                  # branch containing deployable code
-  # remote:                          # uncomment for remote deploy pattern (fork repos)
-  #   name: origin                   # git remote name in the deploy repo
-  #   branch: command-mirror         # branch that receives deploy pushes
+  branch: main
 
 # ==============================================================================
 # STAGING
 # ==============================================================================
 # Staging environment — merge source into staging, deploy via Kamal.
 # Comment out entire section if no staging environment.
+#
+# branch: The staging branch name.
+# kamal_destination: Passed to kamal deploy -d <destination>.
+# url: The live staging web address, Shown in status and check output.
+# merge_strategy: Git merge flags when merging source into staging.
 
 staging:
   branch: staging
-  kamal_destination: staging # kamal deploy -d <destination>
-  url: # staging.example.com         # for status/check output
-
-  # Merge strategy when pulling source into staging
+  kamal_destination: staging
+  url: staging.example.com
   merge_strategy: "--no-edit"
   # merge_strategy: "--squash --no-edit"
 
 # ==============================================================================
 # PRODUCTION
 # ==============================================================================
-# Production environment — promote from staging (or deploy directly from source).
+# Production environment — promote from staging (or source) and deploy.
+#
+# branch: The branch Kamal deploys from for production.
+# url: The live web address, Shown in status and check output.
+# promote_from: Branch to merge into production before deploying.
+#   Usually 'staging'. Set to source branch name for direct deploy.
+# merge_strategy: Git merge flags when promoting.
+# kamal_destination: Passed to kamal deploy -d <destination>.
+#   Comment out if production is the default Kamal destination.
 
 production:
-  branch: main # branch Kamal deploys from for production
-  url: # example.com                 # for status/check output
-
-  # Where production merges FROM
-  promote_from: staging # 'staging' or source branch name for direct deploy
+  branch: main
+  url: example.com
+  promote_from: staging
   merge_strategy: "--no-edit"
-
-  # Kamal destination — comment out if production is the default destination
   # kamal_destination: production
 
 # ==============================================================================
 # SERVER
 # ==============================================================================
 # SSH connection details for hook scripts and status checks.
-# Used by hooks — the deploy script passes these as environment variables.
+# Passed to hooks as DEPLOY_SERVER_HOST and DEPLOY_SERVER_PORT environment variables.
 
 server:
-  host: # root@192.168.1.1
+  host: # user@111.222.333.444
   # port: 22
 
 # ==============================================================================
 # HOOKS
 # ==============================================================================
 # Project-specific scripts called at key moments in the deploy pipeline.
-# Paths relative to project root. Scripts receive config as environment variables.
-#
-# Scaffold example hooks with: dev-deploy init --hooks
-#
-# Available hooks:
-#   pre_deploy      — runs before any kamal deploy (staging or production)
-#   post_deploy     — runs after successful kamal deploy
-#   backup_db       — backup database (called before production deploy)
-#   refresh_db      — copy production data to staging (called by: dev-deploy setup --refresh-db)
+# Paths relative to project root. Scaffold examples with: dev-deploy init --hooks
 #
 # Hook environment variables (set automatically):
 #   DEPLOY_ENV          — 'staging' or 'production'
@@ -85,9 +77,16 @@ server:
 #   DEPLOY_URL          — target URL from config
 #   DEPLOY_SERVER_HOST  — server host from config
 #   DEPLOY_SERVER_PORT  — server port from config
+#
+# Available hooks:
+#   backup_db   — backup database before production deploy
+#   refresh_db  — copy production data to staging
+#   pre_deploy  — runs before any kamal deploy
+#   post_deploy — runs after successful kamal deploy
 
 hooks:
   # backup_db: dev/deploy/hooks/backup-db
   # refresh_db: dev/deploy/hooks/refresh-db
+  # health: dev/deploy/hooks/health
   # pre_deploy: dev/deploy/hooks/pre-deploy
   # post_deploy: dev/deploy/hooks/post-deploy

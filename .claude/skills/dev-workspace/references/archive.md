@@ -14,13 +14,14 @@ dev-workspace archive --no-commit        # Archive files but skip git commit
 
 Each branch gets an archive directory in `dev/branches/` (configurable), named after the branch:
 
-| Branch | Archive path |
-|--------|-------------|
+| Branch              | Archive path                      |
+|---------------------|-----------------------------------|
 | `feature/add-login` | `dev/branches/feature_add-login/` |
-| `fix/redirect-bug` | `dev/branches/fix_redirect-bug/` |
-| `docs-update` | `dev/branches/docs-update/` |
+| `fix/redirect-bug`  | `dev/branches/fix_redirect-bug/`  |
+| `docs-update`       | `dev/branches/docs-update/`       |
 
 Archives are a **mirror** of `dev/workspace/` using `rsync --delete`. This means:
+
 - New files are added
 - Changed files are updated
 - Deleted files are removed from the archive
@@ -37,16 +38,18 @@ After mirroring, the archive is committed to git automatically (unless `--no-com
 ## Archive Check
 
 `dev-workspace archive --check` reports:
+
 - Whether an archive exists and when it was last updated
 - **Sync divergences** with the parent branch:
-  - Archives in parent but not in your branch (can be pulled)
-  - Archives in your branch but not in parent (can be pushed)
+    - Archives in parent but not in your branch (can be pulled)
+    - Archives in your branch but not in parent (can be pushed)
 
 ## Bidirectional Sync (--sync)
 
 `dev-workspace archive --sync` synchronises archives between the current branch and the parent branch.
 
 ### How it works:
+
 1. **Pull first** — Archives that exist in parent but not in your branch are checked out from parent
 2. **Commit pulled archives** — Committed on your branch
 3. **Push second** — Archives in your branch but not in parent are checked out onto the parent branch
@@ -54,13 +57,16 @@ After mirroring, the archive is committed to git automatically (unless `--no-com
 5. **Return** — Switches back to your original branch
 
 ### Why pull-first matters
+
 Pulling first ensures your branch has everything the parent has before pushing new archives. This prevents divergence and keeps archives consistent.
 
 ### Requirements
+
 - **Clean working tree** — The push step temporarily switches branches, so no uncommitted changes allowed
 - Must be on a feature branch (not on parent or main)
 
 ### When to sync
+
 - Before starting work on a branch (pull archives from parent to access context from other branches)
 - After archiving your workspace (push your archive to parent so others can access it)
 - Before merging (ensure all archives are on parent before the branch goes away)
@@ -68,6 +74,7 @@ Pulling first ensures your branch has everything the parent has before pushing n
 ## Archive Path
 
 `dev-workspace archive --path` outputs just the path with no other text. Useful for scripting:
+
 ```bash
 # Check if archive exists
 [[ -d $(dev-workspace archive --path) ]] && echo "archived"

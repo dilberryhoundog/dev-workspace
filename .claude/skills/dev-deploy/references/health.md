@@ -13,8 +13,9 @@
 
 ### Branches
 - Fetches origin to get accurate state
+- Shows source branch sync status (local vs origin)
 - Shows staging sync status (ahead/behind origin)
-- For remote pattern: shows if mirror branch is merged into staging
+- Shows source → staging merge status (commits not yet staged)
 - Helps spot: forgot to push, forgot to stage, staging drift
 
 ### Server

@@ -44,7 +44,7 @@ New branches inherit the parent's workspace state. This is by design — custom 
 
 ## Post-Creation
 
-1. Update `dev/workspace/workspace.yml` — set branch name, start date, purpose
+1. Update `dev/workspace/WORKSPACE.md` — set branch name, start date, purpose
 2. Start working, commit code normally with git
 3. Use `dev-workspace commit` for workspace-only commits
 4. Use `dev-workspace push` when ready to share

@@ -1,0 +1,23 @@
+
+        ╔═══════════════════════════════════╗
+        ║         DEV-WORKSPACE CLI         ║
+        ║   dilberryhoundog/dev-workspace   ║
+        ╚═══════════════════════════════════╝
+
+═══ Command suite that consolidates and links git, file & tree commands
+═══ Simplified and consistent toolset for agents to help humans
+═══ Superboost productivity with pre-made commands designed to "just work".
+
+Usage ═══
+   dev-workspace <command> [options]
+Help ═══
+   dev-workspace help
+   dev-workspace help <command>
+Quick start ═══
+    dev-workspace new <name>     (Create a workspace branch)
+    dev-workspace new            (Show available workspaces)
+    dev-workspace commit         (Commit workspace files)
+    dev-workspace push           (Push branch to remote)
+    dev-workspace sync           (Pull parent changes into branch)
+    dev-workspace merge          (Merge branch back to parent)
+    dev-workspace archive        (Snapshot and save workspace)
