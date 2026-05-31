@@ -33,7 +33,9 @@ staging:
   kamal_destination: staging
   url: staging.example.com
   merge_strategy: "--no-edit"
-  # merge_strategy: "--squash --no-edit"
+  # NOTE: --squash is NOT supported by 'dev-deploy stage'. A squash merge never
+  # creates a commit on its own, so it needs a hand-authored commit and can't be
+  # resumed after a conflict. If you want a squash, stage it manually with git.
 
 # ==============================================================================
 # PRODUCTION

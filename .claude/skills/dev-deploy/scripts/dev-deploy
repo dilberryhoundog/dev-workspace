@@ -161,6 +161,31 @@ load_config() {
 }
 
 # ==============================================================================
+# GIT MERGE-STATE HELPERS
+# ==============================================================================
+
+# True when git is mid-merge (conflict paused). Git's MERGE_HEAD is the source
+# of truth — no custom state file needed to detect this.
+is_merging() {
+    [[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]]
+}
+
+# Guard for --continue: refuse unless a merge is in progress with all
+# conflicts resolved.
+require_merging() {
+    if ! is_merging; then
+        echo "❌ No merge in progress"
+        echo "   --continue is for completing a merge after resolving conflicts"
+        exit 1
+    fi
+    if git diff --name-only --diff-filter=U 2>/dev/null | grep -q .; then
+        echo "❌ Unresolved conflicts remain"
+        echo "   Resolve all conflicts (git status), then re-run --continue"
+        exit 1
+    fi
+}
+
+# ==============================================================================
 # HOOK RUNNER
 # ==============================================================================
 
@@ -233,6 +258,7 @@ cmd_help() {
             echo "Usage:"
             echo "  dev-deploy stage               Merge source → staging and push"
             echo "  dev-deploy stage --check       Preflight — verify readiness before staging"
+            echo "  dev-deploy stage --continue    Complete staging after resolving conflicts"
             echo ""
             echo "Preflight (--check) reports:"
             echo "  • Is source branch in sync with origin?"
@@ -243,7 +269,12 @@ cmd_help() {
             echo "origin before staging can proceed. If not in sync, the command"
             echo "fails — push or pull your source branch first."
             echo ""
+            echo "If the merge hits conflicts, the command stops on the staging branch."
+            echo "Resolve the conflicts, then run 'dev-deploy stage --continue' to finish"
+            echo "the merge commit and push. You stay on the staging branch."
+            echo ""
             echo "Merge strategy: staging.merge_strategy (default: --no-edit)."
+            echo "  --squash is not supported here — stage a squash manually with git."
             ;;
         deploy)
             echo "dev-deploy deploy — Deploy via Kamal"
@@ -525,16 +556,53 @@ cmd_stage() {
         exit 1
     fi
 
-    local check=false
+    local check=false continue_stage=false
     for arg in "$@"; do
         case "$arg" in
             --check) check=true ;;
+            --continue) continue_stage=true ;;
         esac
     done
 
     if [[ "$check" == true ]]; then
         stage_preflight
         return
+    fi
+
+    # Squash merges are not driven by this command: git merge --squash never
+    # creates a commit, so a squash needs a hand-authored commit (and can't be
+    # resumed via MERGE_HEAD after a conflict). Stage a squash manually with git.
+    if [[ "$STAGING_MERGE_STRATEGY" == *"--squash"* ]]; then
+        echo "❌ staging.merge_strategy uses --squash, which dev-deploy stage does not support"
+        echo "   A squash needs a manual commit. Stage it by hand:"
+        echo "     git switch $STAGING_BRANCH"
+        echo "     git pull origin $STAGING_BRANCH"
+        echo "     git merge --squash $SOURCE_BRANCH    # resolve any conflicts"
+        echo "     git commit && git push origin $STAGING_BRANCH"
+        exit 1
+    fi
+
+    # --- Continue after resolving conflicts ---
+    # A conflicted merge leaves you on the staging branch mid-merge; you resolve,
+    # then re-run with --continue to finish the merge commit and push. No state
+    # is stashed — git's own MERGE_HEAD is the source of truth, and you stay on
+    # staging afterwards (where the conflict left you).
+    if [[ "$continue_stage" == true ]]; then
+        require_merging
+
+        echo "→ Completing merge of $SOURCE_BRANCH into $STAGING_BRANCH..."
+        git commit --no-edit
+
+        echo "→ Pushing $STAGING_BRANCH to origin..."
+        git push origin "$STAGING_BRANCH"
+
+        echo ""
+        echo "═══════════════════════════════════════"
+        echo "  ✓ Staged (now on $STAGING_BRANCH)"
+        echo "═══════════════════════════════════════"
+        echo ""
+        echo "Next: dev-deploy deploy staging --check"
+        return 0
     fi
 
     # --- Execute stage ---
@@ -568,7 +636,16 @@ cmd_stage() {
     # Merge source
     echo "→ Merging $SOURCE_BRANCH..."
     # shellcheck disable=SC2086
-    git merge "$SOURCE_BRANCH" $STAGING_MERGE_STRATEGY
+    if ! git merge "$SOURCE_BRANCH" $STAGING_MERGE_STRATEGY; then
+        echo ""
+        echo "⚠ Merge conflicts on $STAGING_BRANCH — staging paused"
+        echo "  1. Resolve the conflicts (git status)"
+        echo "  2. Run: dev-deploy stage --continue"
+        echo ""
+        echo "  You are on $STAGING_BRANCH. --continue finishes the merge commit,"
+        echo "  pushes, and leaves you here (it does not return to $original_branch)."
+        exit 1
+    fi
 
     # Push
     echo "→ Pushing $STAGING_BRANCH to origin..."

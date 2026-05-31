@@ -34,14 +34,15 @@ Always run `--check` before staging. If source is out of sync, the check tells y
 
 ## Merge Conflicts
 
-If `dev-deploy stage` hits a merge conflict, it will fail with git's conflict output. Resolve manually:
+If `dev-deploy stage` hits a merge conflict, it stops on the staging branch with the merge in progress (rather than leaving you stranded mid-pipeline). To finish:
 
-1. Fix conflicted files
-2. `git add` resolved files
-3. `git commit`
-4. `git push origin staging`
+1. Fix the conflicted files (`git status` lists them)
+2. `git add` the resolved files
+3. `dev-deploy stage --continue` — completes the merge commit and pushes
 
-Then continue with `dev-deploy deploy staging`.
+You stay on the staging branch afterwards (where the conflict left you), so `--continue` does **not** return you to the branch you started on. Switch back yourself if needed, then proceed with `dev-deploy deploy staging`.
+
+> `--continue` only supports the default merge strategy. A `--squash` strategy is not supported by `dev-deploy stage` at all — squash needs a hand-authored commit, so stage it manually with git.
 
 ## Safety
 
