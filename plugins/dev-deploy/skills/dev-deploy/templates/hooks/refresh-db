@@ -1,0 +1,18 @@
+#!/bin/bash
+### Refresh staging database from production
+# Called by: dev-deploy setup --refresh-db (via hooks.refresh_db)
+#
+# Environment variables available:
+#   DEPLOY_ENV, DEPLOY_SERVER_HOST, DEPLOY_SERVER_PORT
+#
+# Customise paths and commands for your project.
+
+set -e
+
+# --- Edit these for your project ---
+PROD_DB="/var/lib/docker/volumes/myapp_storage/_data/production.sqlite3"
+STAGING_DB="/var/lib/docker/volumes/myapp_staging_storage/_data/production.sqlite3"
+
+echo "→ Copying production database to staging..."
+ssh "${DEPLOY_SERVER_HOST}" "sqlite3_rsync $PROD_DB $STAGING_DB"
+echo "✓ Staging database refreshed from production"

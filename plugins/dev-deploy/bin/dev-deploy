@@ -1,0 +1,16 @@
+#!/bin/bash
+# dev-deploy launcher (plugin bin/ — already on Claude Code's Bash PATH).
+#
+# Resolves its own location in the plugin and execs the bundled skill script
+# WITHOUT changing cwd, so the script still acts on the project it was called
+# from (its find_project_root walks up from $PWD).
+
+BIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$BIN_DIR/../skills/dev-deploy/scripts/dev-deploy"
+
+if [[ ! -f "$SCRIPT" ]]; then
+    echo "❌ dev-deploy skill script not found at $SCRIPT" >&2
+    exit 1
+fi
+
+exec "$SCRIPT" "$@"

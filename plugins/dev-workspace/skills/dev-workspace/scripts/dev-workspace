@@ -1,0 +1,2208 @@
+#!/bin/bash
+
+# dev-workspace — Dev workspace git workflow management
+# https://github.com/dilberryhoundog/dev-workspace
+
+set -e
+
+VERSION="1.0.0"
+CONFIG_FILE="dev/workspace/workspace-config.yml"
+
+# Resolve skill directory (where templates live)
+resolve_skill_dir() {
+    local scripts_dir
+    scripts_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    echo "$(dirname "$scripts_dir")"
+}
+
+SKILL_DIR=$(resolve_skill_dir)
+
+# ==============================================================================
+# YAML PARSER
+# ==============================================================================
+# YAML parser supporting dotted key paths of any depth.
+# Handles comments, quoted values, and arrays.
+# Keys use dot notation: "workspace_protection.directories"
+
+# Walk a dotted key path through indented YAML, output the target block.
+# Returns lines from the matched key's scope (its value + children).
+_yaml_walk() {
+    local file="$1"
+    IFS='.' read -ra parts <<< "$2"
+
+    local depth=0
+    local target="${parts[$depth]}"
+    local max_depth=$(( ${#parts[@]} - 1 ))
+    local found=false
+    local target_indent=-1
+
+    while IFS= read -r line; do
+        # Skip blank lines and comments
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && {
+            [[ "$found" == true ]] && echo "$line"
+            continue
+        }
+
+        # Calculate indent (number of leading spaces)
+        local stripped="${line#"${line%%[![:space:]]*}"}"
+        local indent=$(( ${#line} - ${#stripped} ))
+
+        # If we've found our target and hit same/lower indent, we're done
+        if [[ "$found" == true && "$indent" -le "$target_indent" ]]; then
+            break
+        fi
+
+        if [[ "$found" == true ]]; then
+            echo "$line"
+            continue
+        fi
+
+        # Match current target at expected indent level
+        local expected_indent=$(( depth * 2 ))
+        if [[ "$indent" -eq "$expected_indent" || ("$indent" -ge "$expected_indent" && "$depth" -gt 0) ]]; then
+            local key_part="${stripped%%:*}"
+            key_part="${key_part%% *}"
+            if [[ "$key_part" == "$target" ]]; then
+                if [[ "$depth" -eq "$max_depth" ]]; then
+                    # Found final key — check for inline value
+                    local value="${stripped#*: }"
+                    if [[ "$value" != "$stripped" && "$value" != *":" ]]; then
+                        # Inline value (not just "key:")
+                        echo "$line"
+                    fi
+                    found=true
+                    target_indent=$indent
+                else
+                    # Descend to next level
+                    (( depth++ ))
+                    target="${parts[$depth]}"
+                fi
+            fi
+        fi
+    done < "$file"
+
+    [[ "$found" == true ]]
+}
+
+yaml_get() {
+    local file="$1" key="$2"
+    [[ ! -f "$file" ]] && return 1
+
+    local output
+    output=$(_yaml_walk "$file" "$key") || return 1
+
+    # Extract scalar value from first line
+    echo "$output" | head -1 | sed 's/^[^:]*: *//' | sed 's/ *#.*//' | sed 's/^["'\'']\(.*\)["'\'']$/\1/'
+}
+
+yaml_get_array() {
+    local file="$1" key="$2"
+    [[ ! -f "$file" ]] && return 1
+
+    _yaml_walk "$file" "$key" | grep -E '^ *- ' | sed 's/^ *- *//' | sed 's/^["'\'']\(.*\)["'\'']$/\1/'
+}
+
+yaml_section_exists() {
+    local file="$1" key="$2"
+    [[ ! -f "$file" ]] && return 1
+
+    _yaml_walk "$file" "$key" >/dev/null 2>&1
+}
+
+# ==============================================================================
+# PROJECT ROOT DETECTION
+# ==============================================================================
+
+find_project_root() {
+    local dir="${1:-$PWD}"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -f "$dir/$CONFIG_FILE" ]]; then
+            echo "$dir"
+            return 0
+        fi
+        dir="$(dirname "$dir")"
+    done
+    return 1
+}
+
+# ==============================================================================
+# CONFIG LOADING
+# ==============================================================================
+
+load_config() {
+    PROJECT_ROOT=$(find_project_root) || {
+        echo "❌ Not in a dev-workspace project"
+        echo "   No $CONFIG_FILE found in current or parent directories"
+        echo "   Run: dev-workspace init --write"
+        exit 1
+    }
+
+    CONFIG="$PROJECT_ROOT/$CONFIG_FILE"
+
+    # Repo config
+    MAIN_BRANCH=$(yaml_get "$CONFIG" "repo_config.main_branch") || MAIN_BRANCH="main"
+    PARENT_BRANCH=$(yaml_get "$CONFIG" "repo_config.parent_branch") || PARENT_BRANCH="main"
+    ORIGIN=$(yaml_get "$CONFIG" "repo_config.origin") || ORIGIN=""
+    UPSTREAM=$(yaml_get "$CONFIG" "repo_config.upstream") || UPSTREAM=""
+    WORKSPACE_REMOTE=$(yaml_get "$CONFIG" "repo_config.workspace") || WORKSPACE_REMOTE=""
+    UPSTREAM_LATEST_TO=$(yaml_get "$CONFIG" "repo_config.upstream_latest_to") || UPSTREAM_LATEST_TO=""
+
+    # Merge config
+    MERGE_STRATEGY=$(yaml_get "$CONFIG" "merge.strategy") || MERGE_STRATEGY="--merge"
+    ARCHIVE_BEFORE_MERGE=$(yaml_get "$CONFIG" "merge.archive_before_merge") || ARCHIVE_BEFORE_MERGE=""
+    DELETE_BRANCH=$(yaml_get "$CONFIG" "merge.delete_branch_after_merge") || DELETE_BRANCH=""
+
+    # Commit config
+    COMMIT_MESSAGE=$(yaml_get "$CONFIG" "commit_workspace.message") || COMMIT_MESSAGE="📝 Workspace files updated!"
+
+    # Archive config
+    ARCHIVE_DIR=$(yaml_get "$CONFIG" "archive.directory") || ARCHIVE_DIR="dev/branches"
+
+    # Deploy config
+    DEPLOY_SOURCE=$(yaml_get "$CONFIG" "deploy.source") || DEPLOY_SOURCE=""
+
+    # Change to project root for all git operations
+    cd "$PROJECT_ROOT"
+
+    # Resolve actual git remote names from configured URLs
+    ORIGIN_REMOTE=$(resolve_remote_name "$ORIGIN")
+    if is_fork; then
+        UPSTREAM_REMOTE=$(resolve_remote_name "$UPSTREAM")
+    else
+        UPSTREAM_REMOTE=""
+    fi
+}
+
+# ==============================================================================
+# HELPERS
+# ==============================================================================
+
+current_branch() {
+    git branch --show-current
+}
+
+is_clean() {
+    [[ -z $(git status --porcelain) ]]
+}
+
+is_merging() {
+    [[ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]]
+}
+
+require_merging() {
+    if ! is_merging; then
+        echo "❌ No merge in progress"
+        echo "   --continue is for completing a merge after resolving conflicts"
+        exit 1
+    fi
+    if git diff --name-only --diff-filter=U 2>/dev/null | grep -q .; then
+        echo "❌ Unresolved conflicts remain"
+        echo "   Resolve all conflicts before running --continue"
+        exit 1
+    fi
+}
+
+require_clean() {
+    if ! is_clean; then
+        echo "❌ Working tree is not clean"
+        echo "   Commit or stash changes first"
+        echo ""
+        git status --short
+        exit 2
+    fi
+}
+
+is_fork() {
+    [[ -n "$UPSTREAM" && "$UPSTREAM" != "false" ]]
+}
+
+# Resolve git remote name from a URL configured in workspace-config.yml.
+# If the URL matches an existing remote, return its name.
+# Falls back to "origin" if no match found.
+resolve_remote_name() {
+    local target_url="$1"
+    [[ -z "$target_url" ]] && echo "origin" && return
+
+    while IFS= read -r line; do
+        local name="${line%%	*}"
+        local url="${line#*	}"
+        url="${url%% *}"
+        if [[ "$url" == "$target_url" ]]; then
+            echo "$name"
+            return
+        fi
+    done < <(git remote -v 2>/dev/null | grep "(push)")
+
+    echo "origin"
+}
+
+# ==============================================================================
+# COMMANDS
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# INFO
+# ------------------------------------------------------------------------------
+
+cmd_info() {
+    cat "$SKILL_DIR/templates/info.txt"
+}
+
+# ------------------------------------------------------------------------------
+# HELP
+# ------------------------------------------------------------------------------
+
+cmd_help() {
+    local topic="$1"
+
+    case "$topic" in
+        init)
+            echo ""
+            echo "dev-workspace init — Scaffold and apply workspace config"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace init                Scaffold config files from skill template"
+            echo "  dev-workspace init --write        Apply config settings to project (idempotent)"
+            echo "  dev-workspace init --check        Verify settings are applied"
+            echo ""
+            echo "The init process has three steps:"
+            echo "  1. Run 'init' to scaffold workspace-config.yml"
+            echo "  2. Edit workspace-config.yml for your project (fork vs vanilla, remotes)"
+            echo "  3. Run 'init --write' to apply settings to git, gitattributes, etc."
+            echo ""
+            ;;
+        new)
+            echo ""
+            echo "dev-workspace new — Create or list workspace branches"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace new                 List branches from parent"
+            echo "  dev-workspace new <name>          Create new workspace branch"
+            echo "  dev-workspace new <name> --check  Validate readiness without creating"
+            echo "  dev-workspace new <name> --force  Create even if local is behind remote"
+            echo ""
+            echo "Must be on parent branch. Branch is created with --no-track."
+            echo ""
+            ;;
+        push)
+            echo ""
+            echo "dev-workspace push — Push current branch to origin"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace push                Push current branch"
+            echo "  dev-workspace push --check        Show push status (ahead/behind/diverged)"
+            echo "  dev-workspace push --check --json Machine-readable status"
+            echo "  dev-workspace push --force-w-l    Force push with lease (post-rebase)"
+            echo ""
+            ;;
+        sync)
+            echo ""
+            echo "dev-workspace sync — Sync current branch with parent"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace sync                Merge parent into current feature branch"
+            echo "  dev-workspace sync --check        Show how far behind parent"
+            echo "  dev-workspace sync --check --json Machine-readable status"
+            echo "  dev-workspace sync --rebase       Rebase onto parent instead of merge"
+            echo "  dev-workspace sync --full         Bare merge — no workspace file protection"
+            echo "  dev-workspace sync --continue     Complete sync after resolving merge conflicts"
+            echo ""
+            echo "Workspace files deleted by the parent are automatically preserved."
+            echo "Use --full to accept all changes including deletions."
+            echo ""
+            echo "Must be on a feature branch (not parent or main)."
+            echo ""
+            ;;
+        merge)
+            echo ""
+            echo "dev-workspace merge — Merge current branch to parent"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace merge                Auto-detect PR or local merge"
+            echo "  dev-workspace merge --check        Full preflight report (ALWAYS run first)"
+            echo "  dev-workspace merge --check --json Machine-readable preflight"
+            echo "  dev-workspace merge --local        Force local merge (skip PR detection)"
+            echo "  dev-workspace merge --github       Force GitHub PR merge"
+            echo "  dev-workspace merge --continue     Complete merge after resolving conflicts"
+            echo ""
+            echo "Reads merge strategy from config. Workspace files are protected."
+            echo ""
+            ;;
+        commit)
+            echo ""
+            echo "dev-workspace commit — Commit workspace files only"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace commit               Commit configured workspace directories"
+            echo "  dev-workspace commit --check       Show what would be committed"
+            echo ""
+            echo "Unstages everything first, then stages only workspace dirs from config."
+            echo ""
+            ;;
+        archive)
+            echo ""
+            echo "dev-workspace archive — Archive workspace context"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace archive              Archive workspace to dev/branches/"
+            echo "  dev-workspace archive --check      Show archive status + sync divergences"
+            echo "  dev-workspace archive --sync       Bidirectional sync archives with parent"
+            echo "  dev-workspace archive --path       Output archive path (for scripting)"
+            echo "  dev-workspace archive --no-commit  Archive files but skip git commit"
+            echo ""
+            ;;
+        latest)
+            echo ""
+            echo "dev-workspace latest — Reset main branch to remote"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace latest --check         Show sync status with origin + upstream"
+            echo "  dev-workspace latest --check --json  Machine-readable status"
+            echo "  dev-workspace latest --upstream      Reset local main to upstream (fork only)"
+            echo "  dev-workspace latest --origin        Reset local main to origin"
+            echo ""
+            echo "⚠ Destructive: unpushed commits on target branch will be lost."
+            echo "Must be on the target branch (upstream_latest_to from config)."
+            echo ""
+            ;;
+        transfer-latest)
+            echo ""
+            echo "dev-workspace transfer-latest — Transfer latest changes to parent branch"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace transfer-latest                 Merge main_branch into parent_branch"
+            echo "  dev-workspace transfer-latest --check         Show status, verify main is current"
+            echo "  dev-workspace transfer-latest --check --json  Machine-readable status"
+            echo "  dev-workspace transfer-latest --ff            Allow fast-forward merge"
+            echo "  dev-workspace transfer-latest --continue      Complete merge after resolving conflicts"
+            echo ""
+            echo "Only for fork repos where main ≠ parent. Errors on vanilla repos."
+            echo ""
+            ;;
+        rebuild)
+            echo ""
+            echo "dev-workspace rebuild — Pull dev-workspace updates"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace rebuild             Pull from workspace remote into parent"
+            echo "  dev-workspace rebuild --check     Check if updates are available"
+            echo ""
+            echo "Requires 'workspace' remote (set up by init --write)."
+            echo ""
+            ;;
+        deploy)
+            echo ""
+            echo "dev-workspace deploy — Deploy push workflow"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace deploy push          Push source to deploy target"
+            echo "  dev-workspace deploy push --check  Show deploy status"
+            echo ""
+            echo "Pushes source branch to a deploy repo's receiving branch."
+            echo "Configure in workspace-config.yml under 'deploy' section."
+            echo ""
+            ;;
+        tree)
+            echo ""
+            echo "dev-workspace tree — Generate directory tree views for agent context"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace tree           Generate all configured trees (default + named)"
+            echo "  dev-workspace tree --show    List available trees (name + description)"
+            echo "  dev-workspace tree help      Show this help"
+            echo ""
+            echo "Trees are configured in workspace-config.yml under the 'tree' section."
+            echo "The default tree writes to tree.md, named trees write to <name>-tree.md."
+            echo "All output includes YAML frontmatter (name + description)."
+            echo ""
+            ;;
+        cleanup)
+            echo ""
+            echo "dev-workspace cleanup — Process conversation exports and workspace tidying"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace cleanup                  List available platforms"
+            echo "  dev-workspace cleanup <platform>       Scan for exports from platform"
+            echo ""
+            echo "Platforms:"
+            # List available platform scripts
+            local script_dir
+            script_dir="$(resolve_skill_dir)/scripts"
+            if compgen -G "$script_dir/cleanup-*" > /dev/null 2>&1; then
+                for script in "$script_dir"/cleanup-*; do
+                    local name
+                    name=$(basename "$script" .sh)
+                    name="${name#cleanup-}"
+                    echo "  $name"
+                done
+            else
+                echo "  (none installed)"
+            fi
+            echo ""
+            echo "The script detects exports and lists history files."
+            echo "Read references/cleanup.md for processing instructions."
+            echo ""
+            ;;
+        *)
+            echo ""
+            echo "dev-workspace v${VERSION} — Git workflow management"
+            echo ""
+            echo "Usage: dev-workspace <command> [options]"
+            echo "       dev-workspace help <command>  Show command details"
+            echo ""
+            echo "Commands:"
+            echo "  init                Scaffold and apply workspace config"
+            echo "  new [name]          Create or list workspace branches"
+            echo "  push                Push current branch to remote"
+            echo "  sync                Sync changes from parent branch"
+            echo "  merge               Merge current branch to parent"
+            echo "  commit              Commit workspace files only"
+            echo "  archive             Archive workspace context"
+            echo "  latest              Integrate changes from upstream/origin"
+            echo "  rebuild             Pull dev-workspace updates"
+            echo "  deploy              Deploy push workflow"
+            echo "  cleanup             Process conversation exports"
+            echo "  tree                Generate directory trees for context"
+            echo "  help                Show this help"
+            echo ""
+            echo "Fork management:"
+            echo "  latest --upstream   Integrate changes from upstream remote"
+            echo "  transfer-latest     Transfer latest changes to parent branch"
+            echo ""
+            echo "Global options:"
+            echo "  --check             Inspect state without changes"
+            echo "  --check --json      Machine-readable check output"
+            echo "  --project <path>    Override project root"
+            echo ""
+            ;;
+    esac
+}
+
+# ------------------------------------------------------------------------------
+# INIT
+# ------------------------------------------------------------------------------
+
+cmd_init() {
+    local mode="$1"
+
+    case "$mode" in
+        --write)
+            init_write
+            ;;
+        --check)
+            init_check
+            ;;
+        *)
+            init_scaffold
+            ;;
+    esac
+}
+
+init_scaffold() {
+    # Scaffold config files into dev/workspace/ from skill templates.
+    # Does NOT require load_config (config doesn't exist yet).
+
+    # Find project root (or use CWD if no config exists yet)
+    local project_root="$PWD"
+
+    local target_dir="$project_root/dev/workspace"
+    local config_target="$target_dir/workspace-config.yml"
+
+    # Check templates exist in skill dir
+    local template_dir="$SKILL_DIR/templates"
+    if [[ ! -f "$template_dir/workspace-config.yml" ]]; then
+        echo "❌ Template not found: $template_dir/workspace-config.yml"
+        echo "   Skill directory: $SKILL_DIR"
+        exit 1
+    fi
+
+    mkdir -p "$target_dir"
+
+    if [[ -f "$config_target" ]]; then
+        echo "ℹ workspace-config.yml already exists at $config_target"
+        echo "  To overwrite, delete it first and re-run init"
+    else
+        cp "$template_dir/workspace-config.yml" "$config_target"
+        echo "✓ Created $config_target"
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Config scaffolded"
+    echo "═══════════════════════════════════════"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Edit $config_target for your project"
+    echo "     (set repo URLs, branch names, fork vs vanilla)"
+    echo "  2. Run: dev-workspace init --write"
+}
+
+init_write() {
+    load_config
+    echo ""
+    echo "🔧 Applying init settings..."
+    echo ""
+
+    # Workspace protection — handled at script level by restore_workspace/preserve_workspace
+    if yaml_section_exists "$CONFIG" "workspace_protection"; then
+        echo "✓ Workspace protection configured"
+    fi
+
+    # Config file merge driver — protects workspace-config.yml via gitattributes.
+    # restore_workspace/preserve_workspace read protection dirs from this file AFTER
+    # a --no-commit merge mutates the working tree. Without a merge driver, the config
+    # on disk may be the merged version (wrong branch's settings). merge=protect keeps
+    # the receiving branch's config intact so the script always reads the correct one.
+    git config merge.protect.name "Keep ours during merge"
+    git config merge.protect.driver true
+    local ga=".gitattributes"
+    local entry="$CONFIG_FILE merge=protect"
+    if [[ -f "$ga" ]]; then
+        grep -qxF "$entry" "$ga" || echo "$entry" >> "$ga"
+    else
+        echo "$entry" > "$ga"
+    fi
+    echo "✓ Config file merge driver set"
+
+    # Git ignore — nuke and recreate .git/info/exclude from config
+    if yaml_section_exists "$CONFIG" "init.git_ignore"; then
+        mkdir -p .git/info
+        {
+            echo "# Managed by dev-workspace — overwritten by init --write"
+            echo "# For personal ignores (.env, editor files) use global: ~/.config/git/ignore"
+            while IFS= read -r path; do
+                echo "$path"
+            done < <(yaml_get_array "$CONFIG" "init.git_ignore.directories")
+        } > .git/info/exclude
+        echo "✓ Local git ignores set"
+    fi
+
+    # Docker ignore
+    if yaml_section_exists "$CONFIG" "init.exclude_workspace_from_docker"; then
+        if [[ -f .dockerignore ]]; then
+            while IFS= read -r path; do
+                grep -qxF "$path" .dockerignore || echo "$path" >> .dockerignore
+            done < <(yaml_get_array "$CONFIG" "init.exclude_workspace_from_docker.directories")
+            echo "✓ .dockerignore updated"
+        else
+            echo "⚠ No .dockerignore found (skipped)"
+        fi
+    fi
+
+    # Workspace remote
+    if yaml_section_exists "$CONFIG" "init.setup_workspace_origin"; then
+        if [[ -n "$WORKSPACE_REMOTE" ]]; then
+            git remote add workspace "$WORKSPACE_REMOTE" 2>/dev/null || \
+                git remote set-url workspace "$WORKSPACE_REMOTE"
+            echo "✓ Workspace remote configured"
+
+            local pull_on_init
+            pull_on_init=$(yaml_get "$CONFIG" "init.setup_workspace_origin.pull_workspace_on_init")
+            if [[ "$pull_on_init" == "true" ]]; then
+                echo ""
+                echo "🔄 Pulling workspace..."
+                cmd_rebuild
+            fi
+        fi
+    fi
+
+    # Make scripts executable if they exist
+    if [[ -d "dev/run" ]]; then
+        chmod +x dev/run/* 2>/dev/null || true
+        echo "✓ Scripts in dev/run/ made executable"
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Init complete"
+    echo "═══════════════════════════════════════"
+}
+
+init_check() {
+    load_config
+    echo ""
+    echo "🔍 Checking init settings..."
+    echo ""
+
+    local warnings=0
+
+    # Workspace protection
+    if yaml_section_exists "$CONFIG" "workspace_protection"; then
+        echo "✓ Workspace protection configured"
+    else
+        echo "⚠ No workspace_protection section in config"
+        ((warnings++))
+    fi
+
+    # Config file merge driver
+    local driver_ok=true
+    if ! git config merge.protect.driver >/dev/null 2>&1; then
+        driver_ok=false
+    fi
+    if [[ -f .gitattributes ]] && grep -qF "$CONFIG_FILE merge=protect" .gitattributes; then
+        if [[ "$driver_ok" == true ]]; then
+            echo "✓ Config file merge driver set"
+        else
+            echo "⚠ .gitattributes entry exists but merge.protect driver not registered"
+            ((warnings++))
+        fi
+    else
+        echo "⚠ Config file merge driver not set"
+        ((warnings++))
+    fi
+
+    # Git ignore
+    if yaml_section_exists "$CONFIG" "init.git_ignore"; then
+        if [[ -f .git/info/exclude ]] && head -1 .git/info/exclude | grep -q "Managed by dev-workspace"; then
+            echo "✓ Local git ignores managed by dev-workspace"
+
+            # Check for tracked files that match ignore patterns
+            while IFS= read -r pattern; do
+                # Skip negation patterns (lines starting with !)
+                [[ "$pattern" == "!"* ]] && continue
+                # Strip leading slash for git ls-files
+                local search="${pattern#/}"
+                local tracked
+                tracked=$(git ls-files "$search" 2>/dev/null)
+                if [[ -n "$tracked" ]]; then
+                    echo "  ⚠ Tracked file(s) matching ignored pattern '$pattern':"
+                    while IFS= read -r f; do
+                        echo "    $f"
+                    done <<< "$tracked"
+                    echo "    Run: git rm --cached <file> to untrack"
+                    ((warnings++))
+                fi
+            done < <(yaml_get_array "$CONFIG" "init.git_ignore.directories")
+        else
+            echo "⚠ .git/info/exclude not managed by dev-workspace"
+            echo "  Run: dev-workspace init --write"
+            ((warnings++))
+        fi
+    fi
+
+    # Workspace remote
+    if yaml_section_exists "$CONFIG" "init.setup_workspace_origin"; then
+        if git remote get-url workspace >/dev/null 2>&1; then
+            echo "✓ Workspace remote: $(git remote get-url workspace)"
+        else
+            echo "⚠ Workspace remote not configured"
+            ((warnings++))
+        fi
+    fi
+
+    # Tree CLI
+    if yaml_section_exists "$CONFIG" "tree"; then
+        if command -v tree &>/dev/null; then
+            echo "✓ tree CLI found: $(command -v tree)"
+        else
+            echo "⚠ tree CLI not found — required for dev-workspace tree"
+            echo "  Install: brew install tree (macOS) / apt install tree (Ubuntu)"
+            ((warnings++))
+        fi
+    fi
+
+    echo ""
+    if [[ "$warnings" -gt 0 ]]; then
+        echo "$warnings issue(s) found — run: dev-workspace init --write"
+        exit 1
+    else
+        echo "✓ All init settings applied"
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# NEW
+# ------------------------------------------------------------------------------
+
+cmd_new() {
+    load_config
+    local name="" check=false force=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help new; return ;;
+            --check) check=true ;;
+            --force) force=true ;;
+            *) [[ -z "$name" ]] && name="$arg" ;;
+        esac
+    done
+
+    # No name — list branches from parent
+    if [[ -z "$name" && "$check" == false ]]; then
+        echo ""
+        echo "Branches from $PARENT_BRANCH:"
+        echo ""
+        git branch --list | grep -v "^[* ]*${MAIN_BRANCH}$" | grep -v "^[* ]*${PARENT_BRANCH}$" | sed 's/^[ *]*/  /'
+        echo ""
+        echo "Usage: dev-workspace new <branch-name>"
+        return 0
+    fi
+
+    local branch
+    branch=$(current_branch)
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 New branch readiness check"
+        echo ""
+
+        local warnings=0
+
+        # Must be on parent branch
+        if [[ "$branch" == "$PARENT_BRANCH" ]]; then
+            echo "✓ On parent branch: $PARENT_BRANCH"
+        else
+            echo "⚠ Not on parent branch (on: $branch, expected: $PARENT_BRANCH)"
+            ((warnings++))
+        fi
+
+        # Clean working tree
+        if is_clean; then
+            echo "✓ Working tree is clean"
+        else
+            echo "⚠ Working tree has uncommitted changes"
+            ((warnings++))
+        fi
+
+        # Sync with remote
+        git fetch "$ORIGIN_REMOTE" "$PARENT_BRANCH" 2>/dev/null || true
+        local behind
+        behind=$(git rev-list --count HEAD.."$ORIGIN_REMOTE/$PARENT_BRANCH" 2>/dev/null || echo "0")
+        local ahead
+        ahead=$(git rev-list --count "$ORIGIN_REMOTE/$PARENT_BRANCH"..HEAD 2>/dev/null || echo "0")
+
+        if [[ "$behind" -eq 0 ]]; then
+            echo "✓ In sync with origin/$PARENT_BRANCH"
+        else
+            echo "⚠ Local is $behind commit(s) behind origin/$PARENT_BRANCH"
+            ((warnings++))
+        fi
+        if [[ "$ahead" -gt 0 ]]; then
+            echo "  ℹ Local has $ahead unpushed commit(s)"
+        fi
+
+        echo ""
+        if [[ "$warnings" -gt 0 ]]; then
+            echo "$warnings warning(s) — review before creating branch"
+            exit 1
+        else
+            echo "✓ Ready to create new branch"
+        fi
+        return 0
+    fi
+
+    # Validate on parent branch
+    if [[ "$branch" != "$PARENT_BRANCH" ]]; then
+        echo "❌ Must be on $PARENT_BRANCH branch (currently on: $branch)"
+        exit 1
+    fi
+
+    require_clean
+
+    # Check sync status (unless --force)
+    if [[ "$force" == false ]]; then
+        git fetch "$ORIGIN_REMOTE" "$PARENT_BRANCH" 2>/dev/null || true
+        local behind
+        behind=$(git rev-list --count HEAD.."$ORIGIN_REMOTE/$PARENT_BRANCH" 2>/dev/null || echo "0")
+        if [[ "$behind" -gt 0 ]]; then
+            echo "❌ Local $PARENT_BRANCH is $behind commit(s) behind origin"
+            echo "   Run: dev-workspace latest --origin"
+            echo "   Or:  dev-workspace new $name --force"
+            exit 3
+        fi
+    fi
+
+    # Check if branch exists
+    if git rev-parse --verify "$name" >/dev/null 2>&1; then
+        echo "❌ Branch '$name' already exists"
+        echo "   Switch to it: git checkout $name"
+        exit 4
+    fi
+
+    # Create branch
+    git checkout -b "$name" --no-track "$PARENT_BRANCH"
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Created branch: $name"
+    echo "═══════════════════════════════════════"
+    echo ""
+    echo "Next: make commits, then dev-workspace push"
+}
+
+# ------------------------------------------------------------------------------
+# PUSH
+# ------------------------------------------------------------------------------
+
+cmd_push() {
+    load_config
+    local check=false force_wl=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help push; return ;;
+            --check) check=true ;;
+            --force-w-l) force_wl=true ;;
+        esac
+    done
+
+    local branch
+    branch=$(current_branch)
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 Push status for $branch"
+        echo ""
+
+        git fetch "$ORIGIN_REMOTE" >/dev/null 2>&1
+
+        local upstream="$ORIGIN_REMOTE/$branch"
+        if git rev-parse --verify "$upstream" >/dev/null 2>&1; then
+            local ahead behind
+            ahead=$(git rev-list --count "$upstream"..HEAD)
+            behind=$(git rev-list --count HEAD.."$upstream")
+
+            if [[ "$ahead" -eq 0 && "$behind" -eq 0 ]]; then
+                echo "✓ Already up to date with origin"
+            elif [[ "$behind" -gt 0 && "$ahead" -gt 0 ]]; then
+                echo "⚠ Diverged: $ahead ahead, $behind behind origin"
+                echo "  Force push needed: dev-workspace push --force-w-l"
+                exit 2
+            elif [[ "$behind" -gt 0 ]]; then
+                echo "⚠ Behind origin by $behind commit(s)"
+                echo "  Pull first or force push: dev-workspace push --force-w-l"
+                exit 2
+            else
+                echo "✓ $ahead commit(s) to push"
+            fi
+        else
+            echo "ℹ New branch — will create remote tracking branch"
+        fi
+        return 0
+    fi
+
+    # Push
+    echo ""
+    echo "🔄 Pushing $branch to origin..."
+
+    if [[ "$force_wl" == true ]]; then
+        git push --force-with-lease "$ORIGIN_REMOTE" "$branch"
+    else
+        git push -u "$ORIGIN_REMOTE" "$branch"
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Pushed to origin/$branch"
+    echo "═══════════════════════════════════════"
+}
+
+# ------------------------------------------------------------------------------
+# SYNC
+# ------------------------------------------------------------------------------
+
+cmd_sync() {
+    load_config
+    local check=false use_rebase=false continue_merge=false full_sync=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help sync; return ;;
+            --check) check=true ;;
+            --rebase) use_rebase=true ;;
+            --continue) continue_merge=true ;;
+            --full) full_sync=true ;;
+        esac
+    done
+
+    local branch
+    branch=$(current_branch)
+
+    # Validate not on parent/main
+    if [[ "$branch" == "$MAIN_BRANCH" || "$branch" == "$PARENT_BRANCH" ]]; then
+        echo "❌ Already on $branch — nothing to sync"
+        echo "   Sync pulls parent into a feature branch"
+        exit 1
+    fi
+
+    # Continue after conflict resolution
+    if [[ "$continue_merge" == true ]]; then
+        require_merging
+        [[ "$full_sync" != true ]] && preserve_workspace
+        git commit --no-edit
+        echo ""
+        echo "═══════════════════════════════════════"
+        echo "  ✓ Branch synced with $PARENT_BRANCH"
+        echo "═══════════════════════════════════════"
+        return 0
+    fi
+
+    if ! git fetch "$ORIGIN_REMOTE" "$PARENT_BRANCH" >/dev/null 2>&1; then
+        echo "⚠ Could not fetch $PARENT_BRANCH from $ORIGIN_REMOTE"
+        echo "  Check repo_config.parent_branch in workspace-config.yml"
+        exit 1
+    fi
+
+    local behind
+    behind=$(git rev-list --count HEAD.."$ORIGIN_REMOTE/$PARENT_BRANCH" 2>/dev/null || echo "0")
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 Sync status for $branch"
+        echo ""
+        echo "  Parent: $PARENT_BRANCH"
+
+        if [[ "$behind" -eq 0 ]]; then
+            echo "  ✓ Already up to date with $PARENT_BRANCH"
+        else
+            echo "  ⚠ $behind commit(s) behind $PARENT_BRANCH"
+        fi
+        [[ "$behind" -gt 0 ]] && exit 1 || return 0
+    fi
+
+    require_clean
+
+    if [[ "$behind" -eq 0 ]]; then
+        echo "✓ Already up to date with $PARENT_BRANCH"
+        return 0
+    fi
+
+    echo ""
+    echo "🔄 Syncing $branch with $PARENT_BRANCH ($behind commits)..."
+
+    if [[ "$use_rebase" == true ]]; then
+        echo "⚠ Note: --rebase cannot protect workspace files from phantom deletions"
+        git rebase "$ORIGIN_REMOTE/$PARENT_BRANCH"
+    else
+        # Auto-enable --no-ff when workspace protection is configured.
+        # Fast-forward skips --no-commit staging, bypassing preserve_workspace.
+        local no_ff=false
+        if [[ "$full_sync" != true ]]; then
+            local wp_dirs=()
+            while IFS= read -r d; do
+                [[ -n "$d" ]] && wp_dirs+=("$d")
+            done < <(yaml_get_array "$CONFIG" "workspace_protection.directories")
+            [[ ${#wp_dirs[@]} -gt 0 ]] && no_ff=true
+        fi
+
+        local merge_flags="--no-commit"
+        [[ "$no_ff" == true ]] && merge_flags="--no-ff --no-commit"
+        if ! git merge $merge_flags "$ORIGIN_REMOTE/$PARENT_BRANCH"; then
+            echo ""
+            echo "⚠ Merge conflicts detected"
+            echo "  Resolve conflicts, then run: dev-workspace sync --continue"
+            exit 1
+        fi
+        # --no-commit only pauses non-ff merges; ff merges complete immediately
+        # Use --no-ff to force a merge commit and enable workspace protection
+        if is_merging; then
+            [[ "$full_sync" != true ]] && preserve_workspace
+            git commit --no-edit
+        fi
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Branch synced with $PARENT_BRANCH"
+    echo "═══════════════════════════════════════"
+}
+
+# ------------------------------------------------------------------------------
+# MERGE
+# ------------------------------------------------------------------------------
+
+cmd_merge() {
+    load_config
+    local check=false use_local=false use_github=false continue_merge=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help merge; return ;;
+            --check) check=true ;;
+            --local) use_local=true ;;
+            --github) use_github=true ;;
+            --continue) continue_merge=true ;;
+        esac
+    done
+
+    local branch
+    branch=$(current_branch)
+
+    # Continue after conflict resolution (local merge on parent branch)
+    if [[ "$continue_merge" == true ]]; then
+        require_merging
+        restore_workspace
+        git commit --no-edit
+        echo "✓ Merged"
+
+        # Push parent
+        echo ""
+        echo "🔄 Pushing $branch..."
+        git push "$ORIGIN_REMOTE" "$branch"
+
+        echo ""
+        echo "═══════════════════════════════════════"
+        echo "  ✓ Local merge complete"
+        echo "═══════════════════════════════════════"
+        return 0
+    fi
+
+    # Validate not on parent/main
+    if [[ "$branch" == "$MAIN_BRANCH" || "$branch" == "$PARENT_BRANCH" ]]; then
+        echo "❌ Cannot merge from $branch"
+        exit 1
+    fi
+
+    if [[ "$check" == true ]]; then
+        merge_check "$branch"
+        return $?
+    fi
+
+    require_clean
+
+    # Determine merge path
+    local pr_number=""
+    if [[ "$use_github" == true ]]; then
+        pr_number=$(gh pr view --json number -q '.number' 2>/dev/null || true)
+        if [[ -z "$pr_number" ]]; then
+            echo "❌ No PR found for this branch"
+            echo "   Create one: gh pr create"
+            exit 4
+        fi
+    elif [[ "$use_local" == false ]]; then
+        # Auto-detect
+        pr_number=$(gh pr view --json number -q '.number' 2>/dev/null || true)
+    fi
+
+    if [[ -n "$pr_number" && "$use_local" == false ]]; then
+        merge_github "$branch" "$pr_number"
+    else
+        merge_local "$branch"
+    fi
+}
+
+merge_check() {
+    local branch="$1"
+    local warnings=0
+    local blockers=0
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  MERGE PREFLIGHT: $branch"
+    echo "═══════════════════════════════════════"
+    echo ""
+    echo "  Target:   $PARENT_BRANCH"
+    echo "  Strategy: $MERGE_STRATEGY"
+    echo ""
+
+    # Clean tree
+    if is_clean; then
+        echo "✓ Working tree is clean"
+    else
+        echo "⚠ Working tree has uncommitted changes"
+        ((warnings++))
+    fi
+
+    # Commits pushed
+    git fetch "$ORIGIN_REMOTE" >/dev/null 2>&1
+    local upstream="$ORIGIN_REMOTE/$branch"
+    if git rev-parse --verify "$upstream" >/dev/null 2>&1; then
+        local unpushed
+        unpushed=$(git rev-list --count "$upstream"..HEAD 2>/dev/null || echo "0")
+        if [[ "$unpushed" -eq 0 ]]; then
+            echo "✓ All commits pushed"
+        else
+            echo "⚠ $unpushed unpushed commit(s)"
+            ((warnings++))
+        fi
+    else
+        echo "⚠ Branch not pushed to origin"
+        ((warnings++))
+    fi
+
+    # Merge conflicts
+    if ! git fetch "$ORIGIN_REMOTE" "$PARENT_BRANCH" >/dev/null 2>&1; then
+        echo "⚠ Could not fetch $PARENT_BRANCH from $ORIGIN_REMOTE"
+        echo "  Check repo_config.parent_branch in workspace-config.yml"
+        exit 1
+    fi
+    local merge_base
+    merge_base=$(git merge-base HEAD "$ORIGIN_REMOTE/$PARENT_BRANCH" 2>/dev/null || true)
+    if [[ -n "$merge_base" ]]; then
+        local conflicts
+        conflicts=$(git merge-tree "$merge_base" HEAD "$ORIGIN_REMOTE/$PARENT_BRANCH" 2>/dev/null | grep -c "^<<<<<<<" || true)
+        if [[ "$conflicts" -gt 0 ]]; then
+            echo "❌ Merge conflicts detected with $PARENT_BRANCH"
+            ((blockers++))
+        else
+            echo "✓ No merge conflicts"
+        fi
+    fi
+
+    # PR status
+    local pr_json
+    pr_json=$(gh pr view --json number,state,isDraft 2>/dev/null || true)
+    if [[ -n "$pr_json" ]]; then
+        local pr_num
+        pr_num=$(echo "$pr_json" | grep -o '"number":[0-9]*' | cut -d: -f2)
+        local pr_draft
+        pr_draft=$(echo "$pr_json" | grep -o '"isDraft":true' || true)
+        if [[ -n "$pr_draft" ]]; then
+            echo "⚠ PR #$pr_num is in draft"
+            ((warnings++))
+        else
+            echo "✓ PR #$pr_num exists"
+        fi
+    else
+        echo "⚠ No PR for this branch"
+        echo "  Local merge only: dev-workspace merge --local"
+        ((warnings++))
+    fi
+
+    # Archive check
+    if [[ "$ARCHIVE_BEFORE_MERGE" == "true" ]]; then
+        local archive_path
+        archive_path=$(get_archive_path "$branch")
+        if [[ -d "$archive_path" ]]; then
+            echo "✓ Workspace archived"
+        else
+            echo "⚠ Archive required but not found"
+            echo "  Run: dev-workspace archive"
+            ((warnings++))
+        fi
+    fi
+
+    # Delete branch check
+    if [[ "$DELETE_BRANCH" == "true" ]]; then
+        echo "⚠ Branch will be deleted after merge (local + remote)"
+        ((warnings++))
+    fi
+
+    # Summary
+    echo ""
+    if [[ "$blockers" -gt 0 ]]; then
+        echo "❌ $blockers blocker(s) — cannot merge"
+        exit 2
+    elif [[ "$warnings" -gt 0 ]]; then
+        echo "⚠ $warnings warning(s) — review before merge"
+        exit 1
+    else
+        echo "✓ Ready to merge"
+        exit 0
+    fi
+}
+
+merge_local() {
+    local branch="$1"
+
+    # Push branch first
+    echo ""
+    echo "🔄 Pushing $branch to origin..."
+    git push -u "$ORIGIN_REMOTE" "$branch"
+    echo "✓ Pushed"
+
+    # Checkout parent and pull
+    echo ""
+    echo "🔄 Checking out $PARENT_BRANCH..."
+    git checkout "$PARENT_BRANCH"
+    git pull "$ORIGIN_REMOTE" "$PARENT_BRANCH"
+
+    # Merge with workspace protection
+    echo ""
+    echo "🔄 Merging $branch..."
+
+    case "$MERGE_STRATEGY" in
+        "--squash")
+            if ! git merge --squash "$branch"; then
+                echo ""
+                echo "⚠ Merge conflicts detected"
+                echo "  Resolve conflicts, then run: dev-workspace merge --continue"
+                exit 1
+            fi
+            restore_workspace
+            git commit -m "🔀 merge: $branch (squash)"
+            ;;
+        *)
+            if ! git merge --no-ff --no-commit "$branch"; then
+                echo ""
+                echo "⚠ Merge conflicts detected"
+                echo "  Resolve conflicts, then run: dev-workspace merge --continue"
+                exit 1
+            fi
+            restore_workspace
+            git commit -m "🔀 merge: $branch"
+            ;;
+    esac
+
+    echo "✓ Merged"
+
+    # Push parent
+    echo ""
+    echo "🔄 Pushing $PARENT_BRANCH..."
+    git push "$ORIGIN_REMOTE" "$PARENT_BRANCH"
+
+    # Delete branch if configured
+    if [[ "$DELETE_BRANCH" == "true" ]]; then
+        echo ""
+        echo "🗑  Deleting branch $branch..."
+        git branch -d "$branch"
+        git push "$ORIGIN_REMOTE" --delete "$branch" 2>/dev/null || true
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Local merge complete"
+    echo "═══════════════════════════════════════"
+}
+
+merge_github() {
+    local branch="$1" pr_number="$2"
+
+    # Push any unpushed commits
+    echo ""
+    echo "🔄 Pushing to origin..."
+    git push -u "$ORIGIN_REMOTE" "$branch"
+
+    # Build gh merge flags
+    local gh_flags=""
+    case "$MERGE_STRATEGY" in
+        "--squash") gh_flags="--squash" ;;
+        *)          gh_flags="--merge" ;;
+    esac
+
+    echo ""
+    echo "🔄 Merging PR #$pr_number via GitHub..."
+    gh pr merge "$pr_number" $gh_flags
+
+    # Update local parent
+    echo ""
+    echo "🔄 Updating local $PARENT_BRANCH..."
+    git checkout "$PARENT_BRANCH"
+    git pull "$ORIGIN_REMOTE" "$PARENT_BRANCH"
+
+    if [[ "$DELETE_BRANCH" == "true" ]]; then
+        git branch -d "$branch" 2>/dev/null || true
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ GitHub merge complete (PR #$pr_number)"
+    echo "═══════════════════════════════════════"
+}
+
+restore_workspace() {
+    # After a --no-commit merge, unstage protected paths so parent's
+    # version is kept and new files from feature branch are discarded.
+    # Reads paths from workspace_protection.directories in config.
+    local dirs=()
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] && dirs+=("$dir")
+    done < <(yaml_get_array "$CONFIG" "workspace_protection.directories")
+
+    [[ ${#dirs[@]} -eq 0 ]] && return 0
+
+    local has_changes=false
+    for dir in "${dirs[@]}"; do
+        if git diff --cached --name-only | grep -q "^${dir}/\|^${dir}$"; then
+            has_changes=true
+            break
+        fi
+    done
+
+    if [[ "$has_changes" == true ]]; then
+        echo "🧹 Restoring workspace files..."
+        for dir in "${dirs[@]}"; do
+            git reset HEAD -- "$dir" >/dev/null 2>&1 || true
+            git checkout -- "$dir" >/dev/null 2>&1 || true
+            git clean -fd -- "$dir" >/dev/null 2>&1 || true
+        done
+        echo "✓ Workspace files preserved"
+    fi
+}
+
+preserve_workspace() {
+    # After a --no-commit sync merge, restore only DELETED files in
+    # protected paths. Modifications and additions from parent flow
+    # through normally — only phantom deletions are blocked.
+    # During --no-commit, HEAD still points to the branch's own commit.
+    local dirs=()
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] && dirs+=("$dir")
+    done < <(yaml_get_array "$CONFIG" "workspace_protection.directories")
+
+    [[ ${#dirs[@]} -eq 0 ]] && return 0
+
+    local restored=false
+    for dir in "${dirs[@]}"; do
+        local deleted_files
+        deleted_files=$(git diff --cached --name-only --diff-filter=D -- "$dir" 2>/dev/null)
+        if [[ -n "$deleted_files" ]]; then
+            while IFS= read -r f; do
+                git checkout HEAD -- "$f" 2>/dev/null && restored=true
+            done <<< "$deleted_files"
+        fi
+    done
+
+    if [[ "$restored" == true ]]; then
+        echo "🛡 Preserved workspace files from phantom deletions"
+    fi
+}
+
+# ------------------------------------------------------------------------------
+# COMMIT
+# ------------------------------------------------------------------------------
+
+cmd_commit() {
+    load_config
+    local check=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help commit; return ;;
+            --check) check=true ;;
+        esac
+    done
+
+    local workspace_dir
+    workspace_dir=$(yaml_get "$CONFIG" "commit_workspace.directories" 2>/dev/null || echo "dev/workspace")
+
+    # Unstage everything first
+    git reset HEAD -- . >/dev/null 2>&1 || true
+
+    # Stage configured directories
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] && git add "$dir" 2>/dev/null || true
+    done < <(yaml_get_array "$CONFIG" "commit_workspace.directories")
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 Workspace files to commit:"
+        echo ""
+        if git diff --cached --quiet 2>/dev/null; then
+            echo "  (no changes)"
+        else
+            git diff --cached --name-only | sed 's/^/  /'
+        fi
+        # Unstage since we were just checking
+        git reset HEAD -- . >/dev/null 2>&1 || true
+        return 0
+    fi
+
+    if git diff --cached --quiet 2>/dev/null; then
+        echo "ℹ No workspace changes to commit"
+        return 0
+    fi
+
+    echo ""
+    echo "📝 Committing workspace files..."
+    git diff --cached --name-only | sed 's/^/  /'
+    echo ""
+    git commit -m "$COMMIT_MESSAGE"
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Workspace committed"
+    echo "═══════════════════════════════════════"
+}
+
+# ------------------------------------------------------------------------------
+# ARCHIVE
+# ------------------------------------------------------------------------------
+
+get_archive_path() {
+    local branch="${1:-$(current_branch)}"
+    local archive_name
+
+    if [[ "$branch" =~ ^(([^/]+)/)?(.+)$ ]]; then
+        local branch_type="${BASH_REMATCH[2]}"
+        local branch_desc="${BASH_REMATCH[3]}"
+
+        if [[ -n "$branch_type" ]]; then
+            archive_name="${branch_type}_${branch_desc}"
+        else
+            archive_name="${branch_desc}"
+        fi
+    else
+        archive_name="$branch"
+    fi
+
+    echo "$ARCHIVE_DIR/$archive_name"
+}
+
+cmd_archive() {
+    load_config
+    local check=false sync=false show_path=false no_commit=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help archive; return ;;
+            --check) check=true ;;
+            --sync) sync=true ;;
+            --path) show_path=true ;;
+            --no-commit) no_commit=true ;;
+        esac
+    done
+
+    local branch
+    branch=$(current_branch)
+    local archive_path
+    archive_path=$(get_archive_path "$branch")
+
+    if [[ "$show_path" == true ]]; then
+        echo "$archive_path"
+        return 0
+    fi
+
+    if [[ "$sync" == true ]]; then
+        archive_sync "$branch"
+        return $?
+    fi
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 Archive status for $branch"
+        echo ""
+        echo "  Path: $archive_path"
+
+        if [[ -d "$archive_path" ]]; then
+            local last_modified
+            # Use git commit date (consistent across clones) with stat fallback for uncommitted archives
+            last_modified=$(git log -1 --format="%ci" -- "$archive_path" 2>/dev/null | cut -d' ' -f1,2 | cut -d: -f1,2)
+            if [[ -z "$last_modified" ]]; then
+                last_modified="uncommitted"
+            fi
+            echo "  ✓ Archive exists (last updated: $last_modified)"
+        else
+            echo "  ⚠ No archive found"
+        fi
+
+        # Check divergences with parent for --sync info
+        archive_sync_check "$branch"
+        return 0
+    fi
+
+    # Validate workspace exists
+    if [[ ! -d "dev/workspace" ]]; then
+        echo "❌ No workspace found at dev/workspace"
+        exit 1
+    fi
+
+    # Archive
+    mkdir -p "$archive_path"
+    rsync -av --delete "dev/workspace/" "$archive_path/"
+
+    echo ""
+    echo "✓ Archived to $archive_path"
+
+    if [[ "$no_commit" == false ]]; then
+        # Commit archive
+        git reset HEAD -- . >/dev/null 2>&1 || true
+        git add "$archive_path"
+
+        if ! git diff --cached --quiet; then
+            local commit_desc="${branch//\//_}"
+            git commit -m "📦 archive workspace: $branch"
+            echo "✓ Archive committed"
+        else
+            echo "ℹ Archive already up to date"
+        fi
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Archive complete"
+    echo "═══════════════════════════════════════"
+}
+
+archive_sync_check() {
+    local branch="$1"
+
+    # Determine source branch for sync
+    local source_branch="$PARENT_BRANCH"
+
+    # Archives in source
+    local source_archives=()
+    while IFS= read -r archive; do
+        [[ -n "$archive" ]] && source_archives+=("$(basename "$archive")")
+    done < <(git ls-tree -d --name-only "$source_branch" -- "$ARCHIVE_DIR/" 2>/dev/null || true)
+
+    # Archives in current
+    local current_archives=()
+    if [[ -d "$ARCHIVE_DIR" ]]; then
+        while IFS= read -r archive; do
+            [[ -n "$archive" ]] && current_archives+=("$(basename "$archive")")
+        done < <(find "$ARCHIVE_DIR" -maxdepth 1 -mindepth 1 -type d 2>/dev/null || true)
+    fi
+
+    # Find differences
+    local to_pull=0 to_push=0
+    for archive in "${source_archives[@]}"; do
+        local found=false
+        for current in "${current_archives[@]}"; do
+            [[ "$archive" == "$current" ]] && found=true && break
+        done
+        [[ "$found" == false ]] && ((to_pull++))
+    done
+
+    for archive in "${current_archives[@]}"; do
+        local found=false
+        for source in "${source_archives[@]}"; do
+            [[ "$archive" == "$source" ]] && found=true && break
+        done
+        [[ "$found" == false ]] && ((to_push++))
+    done
+
+    echo ""
+    echo "  Sync status with $source_branch:"
+    echo "    Archives in $source_branch: ${#source_archives[@]}"
+    echo "    Archives in $branch: ${#current_archives[@]}"
+    if [[ "$to_pull" -gt 0 ]]; then
+        echo "    ⚠ $to_pull archive(s) to pull from $source_branch"
+    fi
+    if [[ "$to_push" -gt 0 ]]; then
+        echo "    ⚠ $to_push archive(s) to push to $source_branch"
+    fi
+    if [[ "$to_pull" -eq 0 && "$to_push" -eq 0 ]]; then
+        echo "    ✓ Archives in sync"
+    fi
+}
+
+archive_sync() {
+    local branch="$1"
+    local source_branch="$PARENT_BRANCH"
+
+    require_clean
+
+    echo ""
+    echo "🔄 Syncing archives between $branch and $source_branch"
+    echo ""
+
+    # Pull first — get archives from parent
+    local source_archives=()
+    while IFS= read -r archive; do
+        [[ -n "$archive" ]] && source_archives+=("$(basename "$archive")")
+    done < <(git ls-tree -d --name-only "$source_branch" -- "$ARCHIVE_DIR/" 2>/dev/null || true)
+
+    local current_archives=()
+    if [[ -d "$ARCHIVE_DIR" ]]; then
+        while IFS= read -r archive; do
+            [[ -n "$archive" ]] && current_archives+=("$(basename "$archive")")
+        done < <(find "$ARCHIVE_DIR" -maxdepth 1 -mindepth 1 -type d 2>/dev/null || true)
+    fi
+
+    # Pull: archives in source but not current
+    local pulled=0
+    for archive in "${source_archives[@]}"; do
+        local found=false
+        for current in "${current_archives[@]}"; do
+            [[ "$archive" == "$current" ]] && found=true && break
+        done
+        if [[ "$found" == false ]]; then
+            echo "📥 Pulling $archive from $source_branch..."
+            git checkout "$source_branch" -- "$ARCHIVE_DIR/$archive"
+            ((pulled++))
+        fi
+    done
+
+    if [[ "$pulled" -gt 0 ]]; then
+        git reset HEAD -- . >/dev/null 2>&1 || true
+        git add "$ARCHIVE_DIR"
+        if ! git diff --cached --quiet; then
+            git commit -m "📥 pull archives from $source_branch"
+            echo "✓ Pulled $pulled archive(s)"
+        fi
+    fi
+
+    # Push: archives in current but not source
+    # Re-scan current archives after pull
+    current_archives=()
+    if [[ -d "$ARCHIVE_DIR" ]]; then
+        while IFS= read -r archive; do
+            [[ -n "$archive" ]] && current_archives+=("$(basename "$archive")")
+        done < <(find "$ARCHIVE_DIR" -maxdepth 1 -mindepth 1 -type d 2>/dev/null || true)
+    fi
+
+    local to_push=()
+    for archive in "${current_archives[@]}"; do
+        local found=false
+        for source in "${source_archives[@]}"; do
+            [[ "$archive" == "$source" ]] && found=true && break
+        done
+        [[ "$found" == false ]] && to_push+=("$archive")
+    done
+
+    if [[ ${#to_push[@]} -gt 0 ]]; then
+        echo ""
+        echo "📤 Pushing ${#to_push[@]} archive(s) to $source_branch..."
+
+        git checkout "$source_branch"
+
+        for archive in "${to_push[@]}"; do
+            git checkout "$branch" -- "$ARCHIVE_DIR/$archive"
+        done
+
+        git reset HEAD -- . >/dev/null 2>&1 || true
+        git add "$ARCHIVE_DIR"
+        if ! git diff --cached --quiet; then
+            git commit -m "📤 push archives from $branch"
+            echo "✓ Pushed ${#to_push[@]} archive(s)"
+        fi
+
+        git checkout "$branch"
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Archive sync complete"
+    echo "═══════════════════════════════════════"
+}
+
+# ------------------------------------------------------------------------------
+# LATEST
+# ------------------------------------------------------------------------------
+
+cmd_latest() {
+    load_config
+    local check=false use_upstream=false use_origin=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help latest; return ;;
+            --check) check=true ;;
+            --upstream) use_upstream=true ;;
+            --origin) use_origin=true ;;
+        esac
+    done
+
+    local target_branch="${UPSTREAM_LATEST_TO:-$MAIN_BRANCH}"
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 Latest status for $target_branch"
+        echo ""
+
+        git fetch "$ORIGIN_REMOTE" >/dev/null 2>&1
+
+        local behind_origin ahead_origin
+        behind_origin=$(git rev-list --count "$target_branch".."$ORIGIN_REMOTE/$target_branch" 2>/dev/null || echo "?")
+        ahead_origin=$(git rev-list --count "$ORIGIN_REMOTE/$target_branch".."$target_branch" 2>/dev/null || echo "?")
+
+        echo "  origin/$target_branch:"
+        if [[ "$behind_origin" == "0" && "$ahead_origin" == "0" ]]; then
+            echo "    ✓ In sync"
+        else
+            [[ "$behind_origin" != "0" ]] && echo "    ⚠ Local is $behind_origin behind origin"
+            [[ "$ahead_origin" != "0" ]] && echo "    ⚠ Local is $ahead_origin ahead of origin"
+        fi
+
+        if is_fork; then
+            git fetch "$UPSTREAM_REMOTE" >/dev/null 2>&1 || true
+            if git rev-parse --verify "$UPSTREAM_REMOTE/$target_branch" >/dev/null 2>&1; then
+                local behind_upstream
+                behind_upstream=$(git rev-list --count "$target_branch".."$UPSTREAM_REMOTE/$target_branch" 2>/dev/null || echo "?")
+                echo ""
+                echo "  $UPSTREAM_REMOTE/$target_branch:"
+                if [[ "$behind_upstream" == "0" ]]; then
+                    echo "    ✓ In sync"
+                else
+                    echo "    ⚠ Local is $behind_upstream behind upstream"
+                fi
+            fi
+        fi
+        return 0
+    fi
+
+    # Validate flags
+    if [[ "$use_upstream" == false && "$use_origin" == false ]]; then
+        echo "Usage: dev-workspace latest [--upstream|--origin|--check]"
+        echo ""
+        echo "  --check      Show sync status"
+        echo "  --upstream   Reset local $target_branch to upstream"
+        echo "  --origin     Reset local $target_branch to origin"
+        return 1
+    fi
+
+    if [[ "$use_upstream" == true ]]; then
+        if ! is_fork; then
+            echo "❌ Not a fork repo — --upstream not available"
+            echo "   Use --origin instead"
+            exit 1
+        fi
+        if [[ -z "$UPSTREAM_LATEST_TO" || "$UPSTREAM_LATEST_TO" == "false" ]]; then
+            echo "❌ upstream_latest_to is disabled in config"
+            exit 1
+        fi
+    fi
+
+    # Must be on target branch
+    local branch
+    branch=$(current_branch)
+    if [[ "$branch" != "$target_branch" ]]; then
+        echo "❌ Must be on $target_branch (currently on: $branch)"
+        exit 1
+    fi
+
+    require_clean
+
+    local remote_ref=""
+    if [[ "$use_upstream" == true ]]; then
+        echo "🔄 Fetching upstream..."
+        git fetch "$UPSTREAM_REMOTE"
+        remote_ref="$UPSTREAM_REMOTE/$target_branch"
+    else
+        echo "🔄 Fetching origin..."
+        git fetch "$ORIGIN_REMOTE"
+        remote_ref="$ORIGIN_REMOTE/$target_branch"
+    fi
+
+    # Check for unpushed commits
+    local ahead
+    ahead=$(git rev-list --count "$remote_ref"..HEAD 2>/dev/null || echo "0")
+    if [[ "$ahead" -gt 0 ]]; then
+        echo ""
+        echo "⚠ Local $target_branch has $ahead commit(s) not in $remote_ref"
+        echo "  These will be LOST by reset."
+        echo ""
+        echo "  Unpushed commits:"
+        git log --oneline "$remote_ref"..HEAD | sed 's/^/    /'
+        exit 3
+    fi
+
+    # Reset
+    echo ""
+    echo "🔄 Resetting $target_branch to $remote_ref..."
+    git reset --hard "$remote_ref"
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ $target_branch reset to $remote_ref"
+    echo "═══════════════════════════════════════"
+    echo ""
+    git log -1 --oneline
+}
+
+# ------------------------------------------------------------------------------
+# TRANSFER-LATEST
+# ------------------------------------------------------------------------------
+
+cmd_transfer_latest() {
+    load_config
+    local check=false use_ff=false continue_merge=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help transfer-latest; return ;;
+            --check) check=true ;;
+            --ff) use_ff=true ;;
+            --continue) continue_merge=true ;;
+        esac
+    done
+
+    # Continue after conflict resolution
+    if [[ "$continue_merge" == true ]]; then
+        require_merging
+        git commit --no-edit
+        echo ""
+        echo "═══════════════════════════════════════"
+        echo "  ✓ $PARENT_BRANCH synced with $MAIN_BRANCH"
+        echo "═══════════════════════════════════════"
+        return 0
+    fi
+
+    # Guard: cannot merge to itself
+    if [[ "$MAIN_BRANCH" == "$PARENT_BRANCH" ]]; then
+        echo "❌ main_branch and parent_branch are the same ($MAIN_BRANCH)"
+        echo "   transfer-latest transfers main into parent (for fork repos with a command branch)"
+        exit 1
+    fi
+
+    local branch
+    branch=$(current_branch)
+
+    if [[ "$branch" != "$PARENT_BRANCH" ]]; then
+        echo "❌ Must be on $PARENT_BRANCH (currently on: $branch)"
+        exit 1
+    fi
+
+    git fetch "$ORIGIN_REMOTE" "$MAIN_BRANCH" >/dev/null 2>&1
+
+    # Verify main is pristine (matches origin)
+    local local_main remote_main
+    local_main=$(git rev-parse "$MAIN_BRANCH" 2>/dev/null || echo "")
+    remote_main=$(git rev-parse "$ORIGIN_REMOTE/$MAIN_BRANCH" 2>/dev/null || echo "")
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 Merge-latest status"
+        echo ""
+        echo "  Source: $MAIN_BRANCH"
+        echo "  Target: $PARENT_BRANCH"
+        echo ""
+
+        if [[ "$local_main" != "$remote_main" ]]; then
+            echo "⚠ Local $MAIN_BRANCH is not in sync with origin"
+            echo "  Run: dev-workspace latest --origin (or --upstream)"
+            exit 1
+        else
+            echo "✓ $MAIN_BRANCH is in sync with origin"
+        fi
+
+        local behind
+        behind=$(git rev-list --count HEAD.."$MAIN_BRANCH" 2>/dev/null || echo "0")
+        if [[ "$behind" -eq 0 ]]; then
+            echo "✓ Already up to date"
+        else
+            echo "ℹ $behind commit(s) to merge from $MAIN_BRANCH"
+            echo ""
+            echo "  Recent commits:"
+            git log --oneline HEAD.."$MAIN_BRANCH" | head -5 | sed 's/^/    /'
+            local total
+            total=$(git rev-list --count HEAD.."$MAIN_BRANCH")
+            [[ "$total" -gt 5 ]] && echo "    ... and $((total - 5)) more"
+        fi
+        return 0
+    fi
+
+    require_clean
+
+    # Verify main is pristine
+    if [[ "$local_main" != "$remote_main" ]]; then
+        echo "❌ Local $MAIN_BRANCH is not in sync with origin"
+        echo "   Run: dev-workspace latest --origin (or --upstream)"
+        exit 3
+    fi
+
+    local behind
+    behind=$(git rev-list --count HEAD.."$MAIN_BRANCH")
+    if [[ "$behind" -eq 0 ]]; then
+        echo "✓ Already up to date with $MAIN_BRANCH"
+        return 0
+    fi
+
+    echo ""
+    echo "🔄 Merging $MAIN_BRANCH into $PARENT_BRANCH ($behind commits)..."
+
+    if [[ "$use_ff" == true ]]; then
+        if ! git merge "$MAIN_BRANCH" -m "🔀 sync: merge $MAIN_BRANCH into $PARENT_BRANCH"; then
+            echo ""
+            echo "⚠ Merge conflicts detected"
+            echo "  Resolve conflicts, then run: dev-workspace transfer-latest --continue"
+            exit 1
+        fi
+    else
+        if ! git merge "$MAIN_BRANCH" --no-ff -m "🔀 sync: merge $MAIN_BRANCH into $PARENT_BRANCH"; then
+            echo ""
+            echo "⚠ Merge conflicts detected"
+            echo "  Resolve conflicts, then run: dev-workspace transfer-latest --continue"
+            exit 1
+        fi
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ $PARENT_BRANCH synced with $MAIN_BRANCH"
+    echo "═══════════════════════════════════════"
+}
+
+# ------------------------------------------------------------------------------
+# REBUILD
+# ------------------------------------------------------------------------------
+
+cmd_rebuild() {
+    load_config
+    local check=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help rebuild; return ;;
+            --check) check=true ;;
+        esac
+    done
+
+    # Verify workspace remote
+    if ! git remote get-url workspace >/dev/null 2>&1; then
+        echo "❌ Workspace remote not configured"
+        echo "   Run: dev-workspace init --write"
+        exit 1
+    fi
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 Checking for workspace updates..."
+        git fetch workspace >/dev/null 2>&1
+        local behind
+        behind=$(git rev-list --count HEAD.."workspace/main" -- dev/ 2>/dev/null || echo "?")
+        echo "  Workspace remote: $(git remote get-url workspace)"
+        if [[ "$behind" == "0" ]]; then
+            echo "  ✓ Up to date"
+        else
+            echo "  ℹ Updates available"
+        fi
+        return 0
+    fi
+
+    local branch
+    branch=$(current_branch)
+
+    require_clean
+
+    echo ""
+    echo "🔄 Fetching workspace remote..."
+    git fetch workspace
+
+    echo "🔄 Checking out $PARENT_BRANCH..."
+    git checkout "$PARENT_BRANCH"
+
+    echo "🔄 Pulling workspace updates..."
+    git pull workspace main --no-rebase --no-edit --allow-unrelated-histories
+
+    echo "✓ Workspace updated on $PARENT_BRANCH"
+
+    if [[ "$branch" != "$PARENT_BRANCH" ]]; then
+        echo ""
+        echo "🔄 Returning to $branch..."
+        git checkout "$branch"
+        echo ""
+        echo "ℹ To get updates in your branch: dev-workspace sync"
+    fi
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Workspace rebuilt"
+    echo "═══════════════════════════════════════"
+}
+
+# ------------------------------------------------------------------------------
+# DEPLOY
+# ------------------------------------------------------------------------------
+
+cmd_deploy() {
+    local subcmd="$1"
+
+    # Help before load_config so it works even without deploy configured
+    case "$subcmd" in
+        help|--help|"")
+            cmd_help deploy; return
+            ;;
+    esac
+
+    load_config
+    shift 2>/dev/null || true
+
+    if [[ -z "$DEPLOY_SOURCE" ]]; then
+        echo "❌ Deploy not configured"
+        echo "   Add deploy section to workspace-config.yml"
+        exit 1
+    fi
+
+    case "$subcmd" in
+        push)
+            deploy_push "$@"
+            ;;
+        *)
+            echo "Usage: dev-workspace deploy push [--check]"
+            ;;
+    esac
+}
+
+deploy_push() {
+    local check=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            --check) check=true ;;
+        esac
+    done
+
+    local deploy_remote_url
+    deploy_remote_url=$(yaml_get "$CONFIG" "deploy.remote.repo_url")
+    local deploy_remote_branch
+    deploy_remote_branch=$(yaml_get "$CONFIG" "deploy.remote.receiving_branch")
+
+    if [[ -z "$deploy_remote_url" || -z "$deploy_remote_branch" ]]; then
+        echo "❌ Deploy remote not configured"
+        echo "   Set deploy.remote in workspace-config.yml"
+        exit 1
+    fi
+
+    if [[ "$check" == true ]]; then
+        echo ""
+        echo "🔍 Deploy push status"
+        echo ""
+        echo "  Source:           $DEPLOY_SOURCE"
+        echo "  Remote:           $deploy_remote_url"
+        echo "  Receiving branch: $deploy_remote_branch"
+
+        if git rev-parse --verify "$DEPLOY_SOURCE" >/dev/null 2>&1; then
+            echo "  ✓ Source branch exists"
+        else
+            echo "  ❌ Source branch '$DEPLOY_SOURCE' not found"
+        fi
+        return 0
+    fi
+
+    require_clean
+
+    local remote_name="deploy"
+    git remote add "$remote_name" "$deploy_remote_url" 2>/dev/null || \
+        git remote set-url "$remote_name" "$deploy_remote_url"
+
+    echo ""
+    echo "🔄 Pushing $DEPLOY_SOURCE to $remote_name/$deploy_remote_branch..."
+    git push "$remote_name" "$DEPLOY_SOURCE:$deploy_remote_branch"
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Deploy push complete"
+    echo "═══════════════════════════════════════"
+}
+
+# ==============================================================================
+# CLEANUP
+# ==============================================================================
+
+cmd_cleanup() {
+    load_config
+
+    local platform="${1:-}"
+
+    if [[ -z "$platform" ]]; then
+        cmd_help cleanup
+        return 0
+    fi
+
+    # Help flag
+    if [[ "$platform" == "help" || "$platform" == "--help" ]]; then
+        cmd_help cleanup
+        return 0
+    fi
+
+    # Find platform script
+    local script_dir
+    script_dir="$(resolve_skill_dir)/scripts"
+    local platform_script="$script_dir/cleanup-${platform}.sh"
+
+    if [[ ! -f "$platform_script" ]]; then
+        echo "❌ Unknown cleanup platform: $platform"
+        echo "   No script found: cleanup-${platform}.sh"
+        echo ""
+        echo "Available platforms:"
+        if compgen -G "$script_dir/cleanup-*" > /dev/null 2>&1; then
+            for script in "$script_dir"/cleanup-*; do
+                local name
+                name=$(basename "$script" .sh)
+                name="${name#cleanup-}"
+                echo "  $name"
+            done
+        else
+            echo "  (none installed)"
+        fi
+        exit 1
+    fi
+
+    local history_dir="$PROJECT_ROOT/dev/workspace/history"
+
+    # Ensure history directory exists
+    mkdir -p "$history_dir"
+
+    # Delegate to platform script
+    bash "$platform_script" "$PROJECT_ROOT" "$history_dir"
+}
+
+# ------------------------------------------------------------------------------
+# TREE
+# ------------------------------------------------------------------------------
+
+cmd_tree() {
+    load_config
+
+    local action="generate"
+
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help) cmd_help tree; return ;;
+            --show) action="show" ;;
+        esac
+    done
+
+    # Delegate to addon script
+    local script_dir
+    script_dir="$(resolve_skill_dir)/scripts"
+    local tree_script="$script_dir/tree"
+
+    if [[ ! -f "$tree_script" ]]; then
+        echo "❌ Tree script not found: $tree_script"
+        exit 1
+    fi
+
+    bash "$tree_script" "$PROJECT_ROOT" "$CONFIG" "$action"
+}
+
+# ==============================================================================
+# MAIN ROUTER
+# ==============================================================================
+
+# Handle --project flag
+if [[ "$1" == "--project" ]]; then
+    cd "$2" || { echo "❌ Cannot access: $2"; exit 1; }
+    shift 2
+fi
+
+COMMAND="${1:-info}"
+shift 2>/dev/null || true
+
+case "$COMMAND" in
+    info)
+        cmd_info
+        ;;
+    help|--help|-h)
+        cmd_help "$@"
+        ;;
+    init)
+        cmd_init "$@"
+        ;;
+    new)
+        cmd_new "$@"
+        ;;
+    push)
+        cmd_push "$@"
+        ;;
+    sync)
+        cmd_sync "$@"
+        ;;
+    merge)
+        cmd_merge "$@"
+        ;;
+    transfer-latest)
+        cmd_transfer_latest "$@"
+        ;;
+    commit)
+        cmd_commit "$@"
+        ;;
+    archive)
+        cmd_archive "$@"
+        ;;
+    latest)
+        cmd_latest "$@"
+        ;;
+    rebuild)
+        cmd_rebuild "$@"
+        ;;
+    deploy)
+        cmd_deploy "$@"
+        ;;
+    cleanup)
+        cmd_cleanup "$@"
+        ;;
+    tree)
+        cmd_tree "$@"
+        ;;
+    version|--version|-v)
+        echo "dev-workspace v${VERSION}"
+        ;;
+    *)
+        echo "❌ Unknown command: $COMMAND"
+        echo "   Run: dev-workspace help"
+        exit 1
+        ;;
+esac

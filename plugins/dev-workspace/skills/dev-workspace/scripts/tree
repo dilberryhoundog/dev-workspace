@@ -1,0 +1,348 @@
+#!/bin/bash
+
+# tree.sh — Generate directory tree views for agent context
+# Called by: dev-workspace tree
+# Args: $1 = project root, $2 = config file path, $3 = action (generate|show)
+
+set -e
+
+PROJECT_ROOT="${1%/}"
+CONFIG="$2"
+ACTION="$3"
+
+if [[ -z "$PROJECT_ROOT" || -z "$CONFIG" || -z "$ACTION" ]]; then
+    echo "❌ Usage: tree.sh <project_root> <config_file> <action>"
+    exit 1
+fi
+
+# ==============================================================================
+# YAML PARSER (minimal, matches main script)
+# ==============================================================================
+
+_yaml_walk() {
+    local file="$1"
+    IFS='.' read -ra parts <<< "$2"
+
+    local depth=0
+    local target="${parts[$depth]}"
+    local max_depth=$(( ${#parts[@]} - 1 ))
+    local found=false
+    local target_indent=-1
+
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && {
+            [[ "$found" == true ]] && echo "$line"
+            continue
+        }
+
+        local stripped="${line#"${line%%[![:space:]]*}"}"
+        local indent=$(( ${#line} - ${#stripped} ))
+
+        if [[ "$found" == true && "$indent" -le "$target_indent" ]]; then
+            break
+        fi
+
+        if [[ "$found" == true ]]; then
+            echo "$line"
+            continue
+        fi
+
+        local expected_indent=$(( depth * 2 ))
+        if [[ "$indent" -eq "$expected_indent" || ("$indent" -ge "$expected_indent" && "$depth" -gt 0) ]]; then
+            local key_part="${stripped%%:*}"
+            key_part="${key_part%% *}"
+            if [[ "$key_part" == "$target" ]]; then
+                if [[ "$depth" -eq "$max_depth" ]]; then
+                    local value="${stripped#*: }"
+                    if [[ "$value" != "$stripped" && "$value" != *":" ]]; then
+                        echo "$line"
+                    fi
+                    found=true
+                    target_indent=$indent
+                else
+                    (( depth++ ))
+                    target="${parts[$depth]}"
+                fi
+            fi
+        fi
+    done < "$file"
+
+    [[ "$found" == true ]]
+}
+
+yaml_get() {
+    local file="$1" key="$2"
+    [[ ! -f "$file" ]] && return 1
+    local output
+    output=$(_yaml_walk "$file" "$key") || return 1
+    echo "$output" | head -1 | sed 's/^[^:]*: *//' | sed 's/ *#.*//' | sed 's/^["'\'']\(.*\)["'\'']$/\1/'
+}
+
+yaml_get_array() {
+    local file="$1" key="$2"
+    [[ ! -f "$file" ]] && return 1
+    _yaml_walk "$file" "$key" | grep -E '^ *- ' | sed 's/^ *- *//' | sed 's/^["'\'']\(.*\)["'\'']$/\1/'
+}
+
+yaml_section_exists() {
+    local file="$1" key="$2"
+    [[ ! -f "$file" ]] && return 1
+    _yaml_walk "$file" "$key" >/dev/null 2>&1
+}
+
+# Get top-level keys from a YAML section block
+yaml_get_keys() {
+    local file="$1" key="$2"
+    [[ ! -f "$file" ]] && return 1
+    local block
+    block=$(_yaml_walk "$file" "$key") || return 1
+
+    # Find the indent of the first real line to identify top-level keys
+    local base_indent=-1
+    while IFS= read -r line; do
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        local stripped="${line#"${line%%[![:space:]]*}"}"
+        local indent=$(( ${#line} - ${#stripped} ))
+        if [[ "$base_indent" -eq -1 ]]; then
+            base_indent=$indent
+        fi
+        if [[ "$indent" -eq "$base_indent" ]]; then
+            local key_part="${stripped%%:*}"
+            key_part="${key_part%% *}"
+            echo "$key_part"
+        fi
+    done <<< "$block"
+}
+
+# ==============================================================================
+# TREE CLI CHECK
+# ==============================================================================
+
+check_tree_cli() {
+    if ! command -v tree &>/dev/null; then
+        echo "❌ 'tree' CLI not found — required for dev-workspace tree"
+        echo "   Install: brew install tree (macOS) / apt install tree (Ubuntu)"
+        return 1
+    fi
+    return 0
+}
+
+# ==============================================================================
+# TREE GENERATION
+# ==============================================================================
+
+# Build pipe-separated ignore string from global + optional extra ignores
+build_ignore_string() {
+    local -a all_ignores=()
+
+    # Global ignores
+    while IFS= read -r pattern; do
+        [[ -n "$pattern" ]] && all_ignores+=("$pattern")
+    done < <(yaml_get_array "$CONFIG" "tree.ignores" 2>/dev/null || true)
+
+    # Extra ignores (passed as remaining args)
+    for pattern in "$@"; do
+        [[ -n "$pattern" ]] && all_ignores+=("$pattern")
+    done
+
+    if [[ ${#all_ignores[@]} -gt 0 ]]; then
+        printf '%s|' "${all_ignores[@]}" | sed 's/|$//'
+    fi
+}
+
+# Generate a single tree file
+# Args: $1=name, $2=description, $3=output_file, $4=depth (empty=unlimited),
+#        remaining args are paths
+generate_tree() {
+    local name="$1" description="$2" output_file="$3" depth="$4"
+    shift 4
+    local -a paths=("$@")
+
+    # Build ignore string (global + tree-specific handled by caller)
+    local ignore_string="$IGNORE_STRING"
+
+    # Build tree command
+    local -a cmd=(tree -a --dirsfirst)
+
+    if [[ -n "$depth" ]]; then
+        cmd+=(-L "$depth")
+    fi
+
+    if [[ -n "$ignore_string" ]]; then
+        cmd+=(-I "$ignore_string")
+    fi
+
+    cmd+=("${paths[@]}")
+
+    # Write frontmatter + tree output
+    {
+        echo "---"
+        echo "name: $name"
+        echo "description: $description"
+        echo "---"
+        echo ""
+        "${cmd[@]}" 2>&1 | sed 's/\xC2\xA0/ /g'
+    } > "$output_file"
+
+    echo "  ✓ $output_file"
+}
+
+# ==============================================================================
+# ACTIONS
+# ==============================================================================
+
+action_generate() {
+    check_tree_cli || exit 1
+
+    local output_dir
+    output_dir=$(yaml_get "$CONFIG" "tree.output_dir") || output_dir="dev/workspace/context"
+    local full_output_dir="$PROJECT_ROOT/$output_dir"
+
+    mkdir -p "$full_output_dir"
+
+    echo ""
+    echo "🌳 Generating trees..."
+    echo ""
+
+    local count=0
+
+    # --- Default tree ---
+    if yaml_section_exists "$CONFIG" "tree.default_tree"; then
+        local name description depth
+        name=$(yaml_get "$CONFIG" "tree.default_tree.name") || name="workspace overview"
+        description=$(yaml_get "$CONFIG" "tree.default_tree.description") || description=""
+
+        depth=$(yaml_get "$CONFIG" "tree.default_tree.depth" 2>/dev/null) || depth=""
+
+        # Collect paths
+        local -a paths=()
+        while IFS= read -r p; do
+            [[ -n "$p" ]] && paths+=("$p")
+        done < <(yaml_get_array "$CONFIG" "tree.default_tree.paths" 2>/dev/null || true)
+
+        if [[ ${#paths[@]} -eq 0 ]]; then
+            paths=(".")
+        fi
+
+        # Build ignore string: global + default-specific
+        local -a extra_ignores=()
+        while IFS= read -r pattern; do
+            [[ -n "$pattern" ]] && extra_ignores+=("$pattern")
+        done < <(yaml_get_array "$CONFIG" "tree.default_tree.ignores" 2>/dev/null || true)
+
+        IGNORE_STRING=$(build_ignore_string "${extra_ignores[@]}")
+
+        generate_tree "$name" "$description" "$full_output_dir/tree.md" "$depth" "${paths[@]}"
+        ((count++))
+    fi
+
+    # --- Named trees ---
+    if yaml_section_exists "$CONFIG" "tree.named_trees"; then
+        while IFS= read -r tree_key; do
+            [[ -z "$tree_key" ]] && continue
+
+            local name description depth
+            name=$(yaml_get "$CONFIG" "tree.named_trees.$tree_key.name") || name="$tree_key"
+            description=$(yaml_get "$CONFIG" "tree.named_trees.$tree_key.description") || description=""
+            depth=$(yaml_get "$CONFIG" "tree.named_trees.$tree_key.depth" 2>/dev/null) || depth=""
+
+            # Collect paths
+            local -a paths=()
+            while IFS= read -r p; do
+                [[ -n "$p" ]] && paths+=("$p")
+            done < <(yaml_get_array "$CONFIG" "tree.named_trees.$tree_key.paths" 2>/dev/null || true)
+
+            if [[ ${#paths[@]} -eq 0 ]]; then
+                paths=(".")
+            fi
+
+            # Build ignore string: global + named-specific
+            local -a extra_ignores=()
+            while IFS= read -r pattern; do
+                [[ -n "$pattern" ]] && extra_ignores+=("$pattern")
+            done < <(yaml_get_array "$CONFIG" "tree.named_trees.$tree_key.ignores" 2>/dev/null || true)
+
+            IGNORE_STRING=$(build_ignore_string "${extra_ignores[@]}")
+
+            generate_tree "$name" "$description" "$full_output_dir/${tree_key}-tree.md" "$depth" "${paths[@]}"
+            ((count++))
+        done < <(yaml_get_keys "$CONFIG" "tree.named_trees")
+    fi
+
+    echo ""
+    if [[ "$count" -eq 0 ]]; then
+        echo "⚠ No trees configured in workspace-config.yml"
+        echo "  Add a 'tree' section — see: dev-workspace help tree"
+    else
+        echo "═══════════════════════════════════════"
+        echo "  ✓ $count tree(s) generated"
+        echo "═══════════════════════════════════════"
+    fi
+}
+
+action_show() {
+    local output_dir
+    output_dir=$(yaml_get "$CONFIG" "tree.output_dir") || output_dir="dev/workspace/context"
+    local full_output_dir="$PROJECT_ROOT/$output_dir"
+
+    if [[ ! -d "$full_output_dir" ]]; then
+        echo "No tree output directory: $output_dir"
+        exit 1
+    fi
+
+    local count=0
+
+    echo ""
+    echo "📋 Available trees in $output_dir/"
+    echo ""
+
+    for tree_file in "$full_output_dir"/*tree.md; do
+        [[ -f "$tree_file" ]] || continue
+
+        local filename name description
+        filename=$(basename "$tree_file")
+
+        # Read frontmatter
+        if head -1 "$tree_file" | grep -q '^---$'; then
+            name=$(sed -n '2,/^---$/p' "$tree_file" | grep '^name:' | sed 's/^name: *//')
+            description=$(sed -n '2,/^---$/p' "$tree_file" | grep '^description:' | sed 's/^description: *//')
+        else
+            name="$filename"
+            description=""
+        fi
+
+        local filepath="$output_dir/$filename"
+        echo "  $filepath"
+        [[ -n "$name" ]] && echo "    name: $name"
+        [[ -n "$description" ]] && echo "    description: $description"
+        echo ""
+        ((count++))
+    done
+
+    if [[ "$count" -eq 0 ]]; then
+        echo "  (no trees found)"
+        echo ""
+        echo "  Run: dev-workspace tree"
+    fi
+}
+
+# ==============================================================================
+# DISPATCH
+# ==============================================================================
+
+case "$ACTION" in
+    generate)
+        cd "$PROJECT_ROOT"
+        action_generate
+        ;;
+    show)
+        action_show
+        ;;
+    check-cli)
+        check_tree_cli
+        ;;
+    *)
+        echo "❌ Unknown action: $ACTION"
+        exit 1
+        ;;
+esac

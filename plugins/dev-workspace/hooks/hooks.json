@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "dev-workspace"
+      },
+      {
+        "type": "command",
+        "command": "dev-workspace tree"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "type": "command",
+        "command": "dev-workspace tree"
+      }
+    ]
+  }
+}

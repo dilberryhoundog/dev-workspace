@@ -1,0 +1,19 @@
+#!/bin/bash
+### Backup database before production deploy
+# Called by: dev-deploy deploy production (via hooks.backup_db)
+#
+# Environment variables available:
+#   DEPLOY_ENV, DEPLOY_SERVER_HOST, DEPLOY_SERVER_PORT
+#
+# Customise paths and commands for your project.
+
+set -e
+
+# --- Edit these for your project ---
+PROD_DB="/var/lib/docker/volumes/myapp_storage/_data/production.sqlite3"
+BACKUP_DIR="/backups/myapp"
+BACKUP_FILE="$BACKUP_DIR/production-deploy-backup-$(date +%Y%m%d-%H%M%S).sqlite3"
+
+echo "→ Backing up production database..."
+ssh "${DEPLOY_SERVER_HOST}" "sqlite3_rsync $PROD_DB $BACKUP_FILE"
+echo "✓ Backup saved to $BACKUP_FILE"
