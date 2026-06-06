@@ -8,7 +8,8 @@ set -e
 VERSION="1.0.0"
 CONFIG_FILE="dev/workspace/workspace-config.yml"
 
-# Resolve skill directory (where templates live)
+# Resolve skill directory (.../skills/dev-workspace — holds scripts, references,
+# assets/info.txt, and templates/workspace-config.yml).
 resolve_skill_dir() {
     local scripts_dir
     scripts_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -16,6 +17,11 @@ resolve_skill_dir() {
 }
 
 SKILL_DIR=$(resolve_skill_dir)
+# Plugin root is two levels up from the skill (.../plugins/dev-workspace).
+# Its templates/ dir is the project-mirroring scaffold (dev/, .claude/) that
+# `init` rsyncs into a project.
+PLUGIN_ROOT=$(cd "$SKILL_DIR/../.." && pwd)
+SCAFFOLD_DIR="$PLUGIN_ROOT/templates"
 
 # ==============================================================================
 # YAML PARSER
@@ -144,7 +150,6 @@ load_config() {
     PARENT_BRANCH=$(yaml_get "$CONFIG" "repo_config.parent_branch") || PARENT_BRANCH="main"
     ORIGIN=$(yaml_get "$CONFIG" "repo_config.origin") || ORIGIN=""
     UPSTREAM=$(yaml_get "$CONFIG" "repo_config.upstream") || UPSTREAM=""
-    WORKSPACE_REMOTE=$(yaml_get "$CONFIG" "repo_config.workspace") || WORKSPACE_REMOTE=""
     UPSTREAM_LATEST_TO=$(yaml_get "$CONFIG" "repo_config.upstream_latest_to") || UPSTREAM_LATEST_TO=""
 
     # Merge config
@@ -245,7 +250,7 @@ resolve_remote_name() {
 # ------------------------------------------------------------------------------
 
 cmd_info() {
-    cat "$SKILL_DIR/templates/info.txt"
+    cat "$SKILL_DIR/assets/info.txt"
 }
 
 # ------------------------------------------------------------------------------
@@ -261,14 +266,20 @@ cmd_help() {
             echo "dev-workspace init — Scaffold and apply workspace config"
             echo ""
             echo "Usage:"
-            echo "  dev-workspace init                Scaffold config files from skill template"
+            echo "  dev-workspace init                Scaffold workspace (additive — never clobbers)"
             echo "  dev-workspace init --write        Apply config settings to project (idempotent)"
             echo "  dev-workspace init --check        Verify settings are applied"
+            echo "  dev-workspace init --update       Refresh scaffold from plugin templates"
+            echo "                                    (parent branch only; overwrites changed"
+            echo "                                     template files, preserves your content)"
             echo ""
             echo "The init process has three steps:"
-            echo "  1. Run 'init' to scaffold workspace-config.yml"
+            echo "  1. Run 'init' to scaffold the workspace (dev/, .claude/, config)"
             echo "  2. Edit workspace-config.yml for your project (fork vs vanilla, remotes)"
             echo "  3. Run 'init --write' to apply settings to git, gitattributes, etc."
+            echo ""
+            echo "After a plugin update, run 'init --update' on the parent branch to pull"
+            echo "new template versions into the blank-slate workspace."
             echo ""
             ;;
         new)
@@ -379,17 +390,6 @@ cmd_help() {
             echo "Only for fork repos where main ≠ parent. Errors on vanilla repos."
             echo ""
             ;;
-        rebuild)
-            echo ""
-            echo "dev-workspace rebuild — Pull dev-workspace updates"
-            echo ""
-            echo "Usage:"
-            echo "  dev-workspace rebuild             Pull from workspace remote into parent"
-            echo "  dev-workspace rebuild --check     Check if updates are available"
-            echo ""
-            echo "Requires 'workspace' remote (set up by init --write)."
-            echo ""
-            ;;
         deploy)
             echo ""
             echo "dev-workspace deploy — Deploy push workflow"
@@ -459,7 +459,6 @@ cmd_help() {
             echo "  commit              Commit workspace files only"
             echo "  archive             Archive workspace context"
             echo "  latest              Integrate changes from upstream/origin"
-            echo "  rebuild             Pull dev-workspace updates"
             echo "  deploy              Deploy push workflow"
             echo "  cleanup             Process conversation exports"
             echo "  tree                Generate directory trees for context"
@@ -492,49 +491,100 @@ cmd_init() {
         --check)
             init_check
             ;;
+        --update)
+            init_update
+            ;;
         *)
             init_scaffold
             ;;
     esac
 }
 
+# Additive scaffold — copies the plugin's project-mirroring templates into the
+# project, NEVER overwriting existing files (rsync --ignore-existing). Safe to
+# run anytime; brings in new template files after a plugin update without
+# touching your content. The workspace-config.yml is copied once from the skill
+# (it is NOT part of the propagating scaffold, so --update never overwrites it).
 init_scaffold() {
-    # Scaffold config files into dev/workspace/ from skill templates.
-    # Does NOT require load_config (config doesn't exist yet).
+    # Project root: an existing config up-tree wins, else CWD (first-time setup).
+    local project_root
+    project_root=$(find_project_root 2>/dev/null) || project_root="$PWD"
 
-    # Find project root (or use CWD if no config exists yet)
-    local project_root="$PWD"
-
-    local target_dir="$project_root/dev/workspace"
-    local config_target="$target_dir/workspace-config.yml"
-
-    # Check templates exist in skill dir
-    local template_dir="$SKILL_DIR/templates"
-    if [[ ! -f "$template_dir/workspace-config.yml" ]]; then
-        echo "❌ Template not found: $template_dir/workspace-config.yml"
-        echo "   Skill directory: $SKILL_DIR"
+    local config_template="$SKILL_DIR/templates/workspace-config.yml"
+    if [[ ! -f "$config_template" ]]; then
+        echo "❌ Config template not found: $config_template"
+        exit 1
+    fi
+    if [[ ! -d "$SCAFFOLD_DIR" ]]; then
+        echo "❌ Scaffold templates not found: $SCAFFOLD_DIR"
         exit 1
     fi
 
-    mkdir -p "$target_dir"
-
+    # 1. Config — copy once, never clobber.
+    local config_target="$project_root/$CONFIG_FILE"
     if [[ -f "$config_target" ]]; then
-        echo "ℹ workspace-config.yml already exists at $config_target"
-        echo "  To overwrite, delete it first and re-run init"
+        echo "ℹ workspace-config.yml already exists (kept)"
     else
-        cp "$template_dir/workspace-config.yml" "$config_target"
-        echo "✓ Created $config_target"
+        mkdir -p "$(dirname "$config_target")"
+        cp "$config_template" "$config_target"
+        echo "✓ Created $CONFIG_FILE"
     fi
+
+    # 2. Scaffold tree (dev/, .claude/) — additive, never clobber.
+    rsync -a --ignore-existing "$SCAFFOLD_DIR"/ "$project_root"/
+    echo "✓ Scaffold applied (new files only)"
 
     echo ""
     echo "═══════════════════════════════════════"
-    echo "  ✓ Config scaffolded"
+    echo "  ✓ Workspace scaffolded"
     echo "═══════════════════════════════════════"
     echo ""
     echo "Next steps:"
     echo "  1. Edit $config_target for your project"
     echo "     (set repo URLs, branch names, fork vs vanilla)"
     echo "  2. Run: dev-workspace init --write"
+}
+
+# Refresh the scaffold from the plugin templates, overwriting changed files but
+# preserving everything not in the templates (no --delete). This is how new
+# template versions propagate after a plugin update. Enforced on the parent
+# branch only: parent holds the blank-slate dev/workspace that new workspaces
+# inherit, so refreshing it there is safe. workspace-config.yml is untouched.
+init_update() {
+    load_config
+
+    local branch
+    branch=$(current_branch)
+    if [[ "$branch" != "$PARENT_BRANCH" ]]; then
+        echo "❌ init --update must run on the parent branch ($PARENT_BRANCH)"
+        echo "   Current branch: $branch"
+        echo "   The parent branch holds the blank-slate workspace that"
+        echo "   propagates to new workspaces. Switch first:"
+        echo "     git checkout $PARENT_BRANCH"
+        exit 1
+    fi
+
+    require_clean
+
+    if [[ ! -d "$SCAFFOLD_DIR" ]]; then
+        echo "❌ Scaffold templates not found: $SCAFFOLD_DIR"
+        exit 1
+    fi
+
+    echo ""
+    echo "🔄 Refreshing scaffold from plugin templates on $PARENT_BRANCH..."
+    # Overwrite conflicting files, add new ones, preserve everything else
+    # (dev/project, dev/branches, custom files) — no --delete.
+    rsync -a "$SCAFFOLD_DIR"/ "$PROJECT_ROOT"/
+    echo "✓ Scaffold refreshed (workspace-config.yml left untouched)"
+
+    echo ""
+    echo "═══════════════════════════════════════"
+    echo "  ✓ Scaffold updated"
+    echo "═══════════════════════════════════════"
+    echo ""
+    echo "Review changes, then propagate:"
+    echo "  dev-workspace commit"
 }
 
 init_write() {
@@ -586,23 +636,6 @@ init_write() {
             echo "✓ .dockerignore updated"
         else
             echo "⚠ No .dockerignore found (skipped)"
-        fi
-    fi
-
-    # Workspace remote
-    if yaml_section_exists "$CONFIG" "init.setup_workspace_origin"; then
-        if [[ -n "$WORKSPACE_REMOTE" ]]; then
-            git remote add workspace "$WORKSPACE_REMOTE" 2>/dev/null || \
-                git remote set-url workspace "$WORKSPACE_REMOTE"
-            echo "✓ Workspace remote configured"
-
-            local pull_on_init
-            pull_on_init=$(yaml_get "$CONFIG" "init.setup_workspace_origin.pull_workspace_on_init")
-            if [[ "$pull_on_init" == "true" ]]; then
-                echo ""
-                echo "🔄 Pulling workspace..."
-                cmd_rebuild
-            fi
         fi
     fi
 
@@ -676,16 +709,6 @@ init_check() {
         else
             echo "⚠ .git/info/exclude not managed by dev-workspace"
             echo "  Run: dev-workspace init --write"
-            ((warnings++))
-        fi
-    fi
-
-    # Workspace remote
-    if yaml_section_exists "$CONFIG" "init.setup_workspace_origin"; then
-        if git remote get-url workspace >/dev/null 2>&1; then
-            echo "✓ Workspace remote: $(git remote get-url workspace)"
-        else
-            echo "⚠ Workspace remote not configured"
             ((warnings++))
         fi
     fi
@@ -1905,74 +1928,6 @@ cmd_transfer_latest() {
 }
 
 # ------------------------------------------------------------------------------
-# REBUILD
-# ------------------------------------------------------------------------------
-
-cmd_rebuild() {
-    load_config
-    local check=false
-
-    for arg in "$@"; do
-        case "$arg" in
-            help|--help) cmd_help rebuild; return ;;
-            --check) check=true ;;
-        esac
-    done
-
-    # Verify workspace remote
-    if ! git remote get-url workspace >/dev/null 2>&1; then
-        echo "❌ Workspace remote not configured"
-        echo "   Run: dev-workspace init --write"
-        exit 1
-    fi
-
-    if [[ "$check" == true ]]; then
-        echo ""
-        echo "🔍 Checking for workspace updates..."
-        git fetch workspace >/dev/null 2>&1
-        local behind
-        behind=$(git rev-list --count HEAD.."workspace/main" -- dev/ 2>/dev/null || echo "?")
-        echo "  Workspace remote: $(git remote get-url workspace)"
-        if [[ "$behind" == "0" ]]; then
-            echo "  ✓ Up to date"
-        else
-            echo "  ℹ Updates available"
-        fi
-        return 0
-    fi
-
-    local branch
-    branch=$(current_branch)
-
-    require_clean
-
-    echo ""
-    echo "🔄 Fetching workspace remote..."
-    git fetch workspace
-
-    echo "🔄 Checking out $PARENT_BRANCH..."
-    git checkout "$PARENT_BRANCH"
-
-    echo "🔄 Pulling workspace updates..."
-    git pull workspace main --no-rebase --no-edit --allow-unrelated-histories
-
-    echo "✓ Workspace updated on $PARENT_BRANCH"
-
-    if [[ "$branch" != "$PARENT_BRANCH" ]]; then
-        echo ""
-        echo "🔄 Returning to $branch..."
-        git checkout "$branch"
-        echo ""
-        echo "ℹ To get updates in your branch: dev-workspace sync"
-    fi
-
-    echo ""
-    echo "═══════════════════════════════════════"
-    echo "  ✓ Workspace rebuilt"
-    echo "═══════════════════════════════════════"
-}
-
-# ------------------------------------------------------------------------------
 # DEPLOY
 # ------------------------------------------------------------------------------
 
@@ -2184,9 +2139,6 @@ case "$COMMAND" in
         ;;
     latest)
         cmd_latest "$@"
-        ;;
-    rebuild)
-        cmd_rebuild "$@"
         ;;
     deploy)
         cmd_deploy "$@"
