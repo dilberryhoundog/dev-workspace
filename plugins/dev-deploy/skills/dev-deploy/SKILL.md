@@ -1,8 +1,6 @@
 ---
 name: dev-deploy
 description: Manage deployment pipelines for projects using Kamal. Use instead of raw kamal/git commands when a project contains dev/deploy/deploy-config.yml. Handles staging merges, production promotion, DB operations via hooks, health checks, and Kamal orchestration. Every command supports --check for safe inspection before execution.
-tools:
-  - exec
 ---
 
 # dev-deploy — Deployment Pipeline Skill
@@ -56,13 +54,13 @@ For dual-repo setups (fork → deploy repo), `dev-workspace deploy push` sends c
 
 Project-specific scripts called at key moments. Hooks receive config as environment variables (`DEPLOY_ENV`, `DEPLOY_SERVER_HOST`, etc). They live in the project at `dev/deploy/hooks/`, not in the skill.
 
-| Hook | Called by | Purpose |
-|------|-----------|---------|
-| `backup_db` | `deploy production` | Backup database before production deploy |
-| `refresh_db` | `setup --refresh-db` or `deploy staging --refresh-db` | Copy production data to staging |
-| `pre_deploy` | `deploy staging` / `deploy production` | Run before Kamal deploy |
-| `post_deploy` | `deploy staging` / `deploy production` | Run after Kamal deploy |
-| `health` | `health` | Custom server health checks |
+| Hook          | Called by                                             | Purpose                                  |
+|---------------|-------------------------------------------------------|------------------------------------------|
+| `backup_db`   | `deploy production`                                   | Backup database before production deploy |
+| `refresh_db`  | `setup --refresh-db` or `deploy staging --refresh-db` | Copy production data to staging          |
+| `pre_deploy`  | `deploy staging` / `deploy production`                | Run before Kamal deploy                  |
+| `post_deploy` | `deploy staging` / `deploy production`                | Run after Kamal deploy                   |
+| `health`      | `health`                                              | Custom server health checks              |
 
 Scaffold example hooks with `dev-deploy init --hooks`.
 
