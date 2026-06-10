@@ -22,7 +22,6 @@
 #
 # origin: The origin remote URL.
 # upstream: The upstream (fork source) remote URL. Comment out for vanilla repos.
-# workspace: The dev-workspace remote. Used by 'dev-workspace rebuild'.
 
 repo_config:
   main_branch: main
@@ -31,7 +30,6 @@ repo_config:
 
   origin: https://github.com/dilberryhoundog/dev-workspace.git
   #  upstream: https://github.com/<username>/<repo>.git       # comment out for non forked repos
-  workspace: https://github.com/dilberryhoundog/dev-workspace.git
 
 # ==============================================================================
 # WORKSPACE PROTECTION
@@ -75,11 +73,6 @@ init:
     directories:
       - "/dev/"
       - "/.claude/"
-
-  # setup_workspace_origin: Adds a 'workspace' git remote pointing to
-  #   repo_config.workspace. Used by 'dev-workspace rebuild' to pull updates.
-  setup_workspace_origin:
-    pull_workspace_on_init: true
 
 # ==============================================================================
 # MERGE
