@@ -1,0 +1,1783 @@
+Session: 226fafb2-18bc-40fa-9f95-9900677ac526
+Date: 2026-06-06 13:57
+Branch: convert-to-plugin
+CWD: ~/Projects/dev-workspace
+
+============================================================
+[SUMMARY]
+>>>
+Conversion of the dev-workspace and dev-deploy CLI skills into Claude Code plugins, sourced from the agent-library marketplace. Established that plugin skills run from a versioned cache, so CLI commands reach the agent via a self-locating bin/ launcher and reach the user's terminal via a registry-resolving ~/.local/bin stub (matched by "<plugin>@" prefix, surviving marketplace renames). Refit dev-workspace init: plugin-root templates/ now mirrors the project (dev/, .claude/) as the scaffold source; plain init is additive (rsync --ignore-existing) while init --update is parent-branch-gated overwrite-but-not-clobber (rsync -a, no --delete), preserving workspace-config.yml, dev/project, and dev/branches. Removed the obsolete git-remote rebuild, the workspace remote, and setup_workspace_origin. dev-deploy got the same init model (ungated, since deploy .claude is static across branches), a starter deploy-repo rule template, a find_project_root fix, removal of invalid SKILL.md frontmatter, and an executable-bit fix on its script (100644 to 100755) that would otherwise break a fresh install. Committed as three commits on branch convert-to-plugin.
+<<<
+------------------------------------------------------------
+
+[USER] [SLASH COMMAND]
+/add-dir ~/Projects/agent-library
+
+------------------------------------------------------------
+
+[USER]    💭: none
+Ok so Im wanting to convert my two dev workspace skills into claude code plugins. as this is the only platform i use them in. I've setup the marketplace and plugin dirs already.
+first i want you to read the agent-library/docs/ files to know what the playing field. 
+then give me some feedback and probable changes we need to make.
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+I'll start by reading the docs in agent-library to understand the playing field.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: ls -la ~/Projects/agent-library/docs/ 2>/dev/null && echo "---STRUCTURE---" && find ~/Projects/agent-library -maxdepth 2 -type d | head -50
+Description: List agent-library docs and structure
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Let me read the docs files and explore the existing plugin/skill structure in parallel.
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/agent-library/docs/create_plugins.md
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now let me examine the current state of the agent-library plugins/skills and the existing dev-workspace skills being converted.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== .claude-plugin (marketplace) ==="
+find .claude-plugin -type f
+echo ""
+echo "=== plugins tree ==="
+find plugins -type f | head -80
+echo ""
+echo "=== skills tree (top) ==="
+find skills -maxdepth 2 -type f | head -40
+Description: Explore agent-library plugin/skill layout
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== marketplace.json ==="
+cat .claude-plugin/marketplace.json
+echo ""
+echo "=== plugin.json files ==="
+for f in plugins/*/.claude-plugin/plugin.json; do echo "--- $f ---"; cat "$f"; echo; done
+echo "=== full skills tree ==="
+find skills -type f | sort
+Description: Show marketplace and plugin manifests
+
+------------------------------------------------------------
+
+[USER]    💭: none
+you need to read all of them
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Got it — let me read all the docs files in full.
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/agent-library/docs/marketplaces.md
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now the plugin reference and the other two docs.
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/agent-library/docs/plugin_reference.md
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now the last two docs.
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/agent-library/docs/plugin_versions.md
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/agent-library/docs/skills_extend.md
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Docs fully read. Now let me inspect the actual current state — the manifests and the skills being converted.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== marketplace.json ==="; cat .claude-plugin/marketplace.json
+echo ""; echo "=== plugin manifests ==="
+for f in plugins/*/.claude-plugin/plugin.json; do echo "--- $f ---"; cat "$f"; echo; done
+Description: Show marketplace and plugin manifests
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now let me look at how the plugin directories and skills are actually populated, and how the dev-workspace CLI/scripts are structured.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== Full tree of plugins/ ==="
+find plugins -type f -o -type l | sort
+echo ""
+echo "=== Full tree of skills/ ==="
+find skills -type f -o -type l | sort
+echo ""
+echo "=== symlinks anywhere? ==="
+find . -type l -not -path './.git/*' | sort
+Description: Full file tree of plugins and skills
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== symlink targets ==="
+ls -la plugins/chat-tools/skills/ plugins/dev-deploy/skills/ plugins/dev-workspace/skills/
+echo ""
+echo "=== dev-workspace stubs ==="
+echo "--- stubs/dev-workspace ---"; cat skills/dev-workspace/stubs/dev-workspace
+echo "--- stubs/dw (symlink) ---"; ls -la skills/dev-workspace/stubs/dw
+echo "--- stubs/readme.txt ---"; cat skills/dev-workspace/stubs/readme.txt
+Description: Inspect symlinks and stubs
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+This reveals the core architecture. Let me read the SKILL.md files and how the scripts locate themselves — the critical migration point.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "########## dev-workspace SKILL.md ##########"; cat skills/dev-workspace/SKILL.md
+echo ""; echo "########## head of scripts/dev-workspace (self-location) ##########"; head -60 skills/dev-workspace/scripts/dev-workspace
+Description: Read dev-workspace SKILL.md and script header
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Let me check the remaining critical pieces: dev-deploy/conversation-capture self-location, and where the SessionStart splash hook currently lives.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== conversation-capture script head ==="; head -30 skills/conversation-capture/scripts/conversation-capture
+echo "=== conversation-capture config.yml ==="; cat skills/conversation-capture/config.yml
+echo ""; echo "=== dev-deploy script self-location ==="; head -25 skills/dev-deploy/scripts/dev-deploy
+echo ""; echo "=== dev-deploy stub ==="; cat skills/dev-deploy/stubs/dev-deploy 2>/dev/null
+echo ""; echo "=== where is SessionStart splash hook configured? ==="
+grep -rl "SessionStart\|dev-workspace" ~/Projects/dev-workspace/.claude/settings.json ~/Projects/dev-workspace/.claude/hooks 2>/dev/null
+cat ~/Projects/dev-workspace/.claude/settings.json 2>/dev/null | head -40
+Description: Check capture/deploy scripts and hook config
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+grep -n "hooks\|SessionStart\|splash\|info" .claude/settings.json 2>/dev/null
+echo "--- tail of settings.json ---"
+tail -40 .claude/settings.json 2>/dev/null
+Description: Find SessionStart hook in settings
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+I've now read all five docs and mapped the current repo + the two skills as they run today in `dev-workspace`. Here's my assessment.
+
+## How things work today (the constraints we're migrating)
+
+- **The skills are self-contained.** Both `scripts/dev-workspace` and `scripts/dev-deploy` resolve their own location via `${BASH_SOURCE[0]}` and find `templates/`/`references/` relative to themselves. `conversation-capture` (Ruby) does the same with `__dir__`. ✅ This is the good news — the scripts will run fine from a plugin cache directory without changes.
+- **The CLI must be on PATH in three places:** (a) your interactive terminal, (b) Claude's Bash tool, (c) the SessionStart/SessionEnd hooks. Today all three are satisfied by a stub in `~/.local/bin/dev-workspace` that walks up the tree to find a **project-local** `.claude/skills/dev-workspace/scripts/dev-workspace`.
+- **That stub is the thing that breaks.** Once this is a plugin, the script lives in `~/.claude/plugins/cache/...`, not in the project. The walk-up stub will never find it → `❌ Not in a dev-workspace project`.
+- **Hooks** (splash + `tree` on start, `tree` on end) live in the project's `.claude/settings.json` and call the bare `dev-workspace` command.
+- **Preloaded context** (`.claude/rules/dev-workspace_commands.md`, `_guide.md`, `tree.md`, and the `@dev/workspace/CLAUDE.md` import) is project config. **Plugins do not load CLAUDE.md or rules** — only skills, agents, hooks. Most of that content already lives in `SKILL.md`, so this is mostly fine, but the auto-loaded guide won't auto-load anymore.
+
+## Problems in the current `agent-library` scaffold
+
+1. **Two parallel structures.** Real content is in `skills/`, and `plugins/*/skills/*` are symlinks back to `../../../skills/`. That's fragile and the sourcing is inconsistent (see #2).
+2. **`git-subdir` + outward symlinks = broken install.** `dev-workspace` and `dev-deploy` marketplace entries use `git-subdir` with path `./plugins/dev-workspace`, but that dir's `skills/` is a symlink pointing **outside** the subdir (`../../../skills/`). Per the reference: *symlinks resolving outside the checkout are skipped for security*, and `git-subdir` only sparse-clones the subdir. **Those two plugins would install with empty skills.** Relative-path sources (whole-repo clone) dereference sibling symlinks fine; `git-subdir` does not.
+3. **Mixed/duplicated sourcing.** dev-workspace & dev-deploy point at an *external* repo (`github.com/dilberryhoundog/dev-workspace.git`) while chat-tools uses local `./` with `strict:false`. This repo (`agent-library`) is itself the marketplace — pick one model. Also the source URL repo name (`dev-workspace`) doesn't match this dir (`agent-library`); need to confirm the actual remote.
+4. **chat-tools is defined twice** — once via its own `plugin.json` and again in the marketplace entry (`strict:false` + explicit `skills` list). Redundant; let `plugin.json` be the authority and source `./plugins/chat-tools`.
+5. **Version pinning conflicts.** chat-tools is `0.1.0` in `plugin.json` but `0.1.1` in the marketplace entry — `plugin.json` wins silently. And pinned versions mean pushing commits won't reach you unless you bump every time. For active dev, omitting `version` (commit-SHA) is simpler.
+
+## The one decision that drives the whole design
+
+Everything else is mechanical. The real fork is **how you (the human) get the `dev-workspace`/`dev-deploy` commands in your terminal** once the script lives in a versioned plugin cache. Let me get your call on that and a couple of related points before I propose a concrete plan.
+
+------------------------------------------------------------
+
+[USER]    💭: none
+dev-workspace;
+- good news, the bin/ dir is placed on claude's bash path, for both CC and co-work. we can write a small stub there and claude will be able to use easily, for me web claude gave me this launcher `dev/workspace/filebox/launcher`.
+- hooks have been migrated into the plugin. they will be injected. these variable are provided to help with hooks etc ${CLAUDE_PLUGIN_ROOT}, ${CLAUDE_PLUGIN_DATA}, ${CLAUDE_PROJECT_DIR}.
+- rules files are in a ./templates/rules/ dir we can update the plugin to install these into .claude/rules upon setup.
+agent-library;
+1. Symlinking has first class support in plugins ~/Projects/agent-library/docs/plugin_reference.md:721
+2. These should all work. as they are referencing the plugins in dev-workspace repo
+3. marketplaces can use a mix of local, git, url etc sources. as long as they resolve. this is present in anthropics own official marketplace.
+
+------------------------------------------------------------
+
+[USER]    💭: none
+dev-workspace;
+- good news, the bin/ dir is placed on claude's bash path, for both CC and co-work. we can write a small stub there and claude will be able to use easily, for me web claude gave me this launcher `dev/workspace/filebox/launcher`.
+- hooks have been migrated into the plugin. they will be injected. these variable are provided to help with hooks etc ${CLAUDE_PLUGIN_ROOT}, ${CLAUDE_PLUGIN_DATA}, ${CLAUDE_PROJECT_DIR}.
+- rules files are in a ./templates/rules/ dir we can update the plugin to install these into .claude/rules upon setup.
+agent-library;
+1. Symlinking has first class support in plugins ~/Projects/agent-library/docs/plugin_reference.md:721
+2. These should all work. as they are referencing the plugins in dev-workspace repo
+3. marketplaces can use a mix of local, git, url etc sources. as long as they resolve. this is present in anthropics own official marketplace.
+4. fixed
+5. was playing with versions when doing install testing, will reset back to standard. done
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Understood — thanks for the corrections. Let me look at the launcher web Claude gave you and re-check the current plugin state (hooks, bin, templates/rules).
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+echo "=== launcher ==="; cat dev/workspace/filebox/launcher 2>/dev/null
+echo ""; echo "=== agent-library: current plugin + skill dirs (re-scan) ==="
+cd ~/Projects/agent-library
+find plugins -maxdepth 3 \( -type f -o -type l \) | sort
+echo "--- templates/rules ? ---"
+find skills -path '*templates/rules*' -o -path '*templates*rules*' 2>/dev/null | sort
+ls -la skills/dev-workspace/templates/ 2>/dev/null
+Description: Read launcher and rescan plugin state
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~
+echo "=== plugins registry files present? ==="
+ls -la ~/.claude/plugins/ 2>/dev/null
+echo "--- installed_plugins.json shape (keys) ---"
+jq 'if type=="object" then (keys) else type end' ~/.claude/plugins/installed_plugins.json 2>/dev/null || echo "NOT FOUND / not json"
+echo ""; echo "=== where script actually lives in the plugin (via symlink) ==="
+ls -la ~/Projects/agent-library/plugins/dev-workspace/skills/dev-workspace/scripts/ 2>/dev/null | head
+Description: Verify plugin registry and script path
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: jq '.plugins | to_entries | map({key, val0: (.value[0] // .value)}) | .[0:2]' ~/.claude/plugins/installed_plugins.json 2>/dev/null
+echo "--- does any record have installPath / projectPath? ---"
+jq -r '[.. | objects | keys] | add | unique' ~/.claude/plugins/installed_plugins.json 2>/dev/null
+Description: Inspect installed_plugins.json structure for launcher fields
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Key finding — the launcher's logic doesn't match your **actual** registry shape. Let me verify the hooks migration too before I summarize.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== hooks anywhere in plugins/skills? ==="
+find plugins skills -iname '*hook*' -o -name 'hooks.json' 2>/dev/null | grep -v references/hooks.md
+echo "--- plugin.json hooks keys? ---"
+grep -l hooks plugins/*/.claude-plugin/plugin.json 2>/dev/null || echo "no hooks key in any plugin.json"
+echo ""
+echo "=== marketplace name mismatch check ==="
+echo "repo marketplace.json name:"; jq -r .name .claude-plugin/marketplace.json
+echo "installed registry keys:"; jq -r '.plugins|keys[]|select(contains("Plugin")or contains("DBH"))' ~/.claude/plugins/installed_plugins.json
+echo "known_marketplaces:"; jq -r '.marketplaces // . | keys[]?' ~/.claude/plugins/known_marketplaces.json 2>/dev/null
+Description: Verify hooks migration and marketplace naming
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== dev-workspace/hooks ==="; find plugins/dev-workspace/hooks -type f -o -type l | sort
+echo "--- contents ---"; for f in $(find plugins/dev-workspace/hooks -type f); do echo "### $f"; cat "$f"; echo; done
+echo "=== dev-deploy/hooks ==="; find plugins/dev-deploy/hooks -type f -o -type l | sort
+Description: Read migrated plugin hooks
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Re-checked everything against your corrections and the live registry. Most of your points stand — but a few concrete things are off that will bite during install. Here's the corrected picture and the actual punch list.
+
+## What you've got right
+- **`bin/` launcher approach is sound.** It works for CC and co-work since `bin/` is on the Bash tool PATH, and the launcher resolves the cache path so it survives version bumps. Good call.
+- **Symlinks** — agreed, first-class within a marketplace (they get dereferenced into the cache, ref `plugin_reference.md:721`). The `skills/` + `plugins/*/skills/*` symlink layout is fine.
+- **Mixed sources** in `marketplace.json` — agreed, fine as long as each resolves.
+- **Self-contained scripts** (BASH_SOURCE / `__dir__`) — confirmed, they'll run from the cache untouched.
+
+## Real problems still open
+
+**1. The launcher's `jq` doesn't match your registry shape — it will fail to resolve.**
+Your `installed_plugins.json` stores each key as a **single object**, not an array, and there's **no `projectPath` field** (everything installs `user` scope):
+```
+"chat-tools@DBHG-Plugin-Marketplace": { "scope": "user", "installPath": "...", "version": "0.1.1", "gitCommitSha": "..." }
+```
+The launcher does `(.plugins[$key] // []) | map(...) | .[0].installPath` — `map`/`.[0]` assume an array, so this returns null against a bare object. It needs to be roughly `.plugins[$key].installPath`. The whole `projectPath`/cwd-preference block has nothing to match and should be dropped (or reworked if you ever use project scope).
+
+**2. The launcher's `SCRIPT_REL` is wrong.** It says `scripts/dev-workspace`, but inside the plugin the script lives one level deeper under the skill: `skills/dev-workspace/scripts/dev-workspace`. Same for dev-deploy.
+
+**3. Marketplace name mismatch.** Repo `marketplace.json` says `"name": "DBHD-Plugins"`, but the installed/known marketplace is **`DBHG-Plugin-Marketplace`** (note D**B**H**G**, not DBHD). The launcher's `PLUGIN_KEY="dev-workspace@your-marketplace"` is still a placeholder. These three names must agree or the launcher's registry lookup and `/plugin install` won't line up. Decide on the canonical name and set it everywhere.
+
+**4. Hooks are NOT actually migrated — the `hooks/` dirs are empty.**
+`plugins/dev-workspace/hooks/` and `plugins/dev-deploy/hooks/` exist but contain no `hooks.json`. The SessionStart (splash + `tree`) and SessionEnd (`tree`) hooks still only live in `dev-workspace/.claude/settings.json`. You'll need a `hooks/hooks.json` like:
+```json
+{ "hooks": { "SessionStart": [{ "hooks": [
+  { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/dev-workspace/scripts/dev-workspace" },
+  { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/skills/dev-workspace/scripts/dev-workspace tree" }
+]}]}}
+```
+(Reference the script directly via `${CLAUDE_PLUGIN_ROOT}` rather than relying on `bin/` being on the hook process PATH.)
+
+**5. `templates/rules/` doesn't exist yet.** You mentioned installing rules into `.claude/rules` on setup, but `skills/dev-workspace/templates/` currently holds only `info.txt` and `workspace-config.yml`. The rules content (`dev-workspace_commands.md`, `_guide.md`, `context.md`) currently lives in the *consuming* project's `.claude/rules/`. To ship it: create `skills/dev-workspace/templates/rules/`, drop those files in, and extend `dev-workspace init --write` to copy them into the project's `.claude/rules/`.
+
+## Net change list
+1. Fix launcher jq (`.plugins[$key].installPath`), drop projectPath logic, fix `SCRIPT_REL` to `skills/<name>/scripts/<name>`, set real `PLUGIN_KEY`. Place as `plugins/<name>/bin/<name>` for both dev-workspace and dev-deploy.
+2. Reconcile the marketplace name across `marketplace.json`, the installed marketplace, and launcher keys.
+3. Author `hooks/hooks.json` in both plugins (or wire via `plugin.json`), using `${CLAUDE_PLUGIN_ROOT}`.
+4. Add `templates/rules/` + teach `init --write` to install them.
+5. Reset versions (you're doing this).
+
+Two quick decisions before I start implementing:
+
+------------------------------------------------------------
+
+[USER]    💭: none
+don't panic on marketplace name change, im trying to find one I like, very easy to uninstall old marketplaces and plugins.
+Launcher was web claude riffing, it is a pointer not truth. he didn't have oversight over the codebase. this will be your job to do the plumbing here so this works.
+Both hook and rules are inplace, looks like you've changed the cwd, and maybe can't see. @plugins/dev-workspace/templates/rules
+@plugins/dev-workspace/hooks/hooks.json
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+You're right — let me read the actual files at those paths rather than trust my earlier scan.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/agent-library
+echo "=== full plugins/dev-workspace tree (resolving symlinks) ==="
+find -L plugins/dev-workspace -maxdepth 3 \( -type f -o -type l \) 2>/dev/null | sort
+echo ""
+echo "=== hooks.json ==="; cat plugins/dev-workspace/hooks/hooks.json 2>/dev/null || echo "MISSING at that path"
+echo ""
+echo "=== templates/rules listing ==="; ls -la plugins/dev-workspace/templates/rules 2>/dev/null || echo "MISSING at that path"
+Description: Read hooks.json and templates/rules at given paths
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+`find -L` is acting odd, and those paths are missing in
+
+------------------------------------------------------------
+
+[USER]    💭: none
+you in agent-library doofus
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: ls -la ~/Projects/agent-library/plugins/dev-workspace/
+echo "=== hooks ==="; ls -la ~/Projects/agent-library/plugins/dev-workspace/hooks/ 2>&1
+echo "=== templates ==="; ls -la ~/Projects/agent-library/plugins/dev-workspace/templates/ 2>&1
+Description: Direct absolute listing of plugin dir
+
+------------------------------------------------------------
+
+[USER]    💭: none
+you in agent-library doofus, this session started in projects/dev-workspace with agent-library added as another directory
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Ah — checking the **dev-workspace** project root, not agent-library.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+echo "=== hooks.json ==="; cat plugins/dev-workspace/hooks/hooks.json 2>&1
+echo ""; echo "=== templates/rules ==="; ls -la plugins/dev-workspace/templates/rules/ 2>&1
+echo ""; echo "=== full plugins/dev-workspace tree here ==="; find plugins/dev-workspace \( -type f -o -type l \) 2>/dev/null | sort
+Description: Read plugin files in dev-workspace project root
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Got it — my mistake. The **canonical plugin source is `dev-workspace/plugins/`** (this session's primary root); the `agent-library/plugins/*` copies are the stale symlinked ones I was wrongly fixated on. That reframes everything:
+
+- The real `plugins/dev-workspace/` is self-contained (real dirs, not outward symlinks), so git-subdir sourcing is fine — my earlier "broken symlink" worry was about the stale copy. Withdrawn.
+- `hooks/hooks.json`, `templates/rules/`, `commands/` are all present here. Good.
+
+So `agent-library` holds the marketplace catalog that git-subdirs back into this repo's `plugins/`. Makes sense.
+
+One **real bug** in the actual `hooks/hooks.json` though — the schema is flattened. Plugin (and settings) hooks need each event to be an array of **groups**, each with its own `hooks:` array. Yours is:
+
+```json
+"SessionStart": [ { "type": "command", "command": "dev-workspace" }, ... ]
+```
+
+but it must be:
+
+```json
+"SessionStart": [ { "hooks": [
+  { "type": "command", "command": "dev-workspace" },
+  { "type": "command", "command": "dev-workspace tree" }
+]}]
+```
+
+Your original `settings.json` had the wrapper; the migration dropped it. As written, these likely won't fire. (Separately: bare `dev-workspace` relies on `bin/` being on the *hook* process PATH — if that's not guaranteed for hook subprocesses, `"${CLAUDE_PLUGIN_ROOT}"/skills/dev-workspace/scripts/dev-workspace` is the safe form.)
+
+Remaining real plumbing left to do, all in `dev-workspace/plugins/`:
+1. **`bin/` launcher** for dev-workspace + dev-deploy (the registry-resolving stub — my job to wire correctly against your actual `installed_plugins.json` shape).
+2. **Fix `hooks.json`** schema (above).
+3. **Wire `init --write`** to copy `templates/rules/*` into the project's `.claude/rules/`.
+4. **Retire old `stubs/`** (superseded by `bin/`).
+
+Before I touch anything: is `dev-workspace/plugins/` the directory you want me editing as source of truth, and should I start with the `bin/` launcher + `hooks.json` fix?
+
+------------------------------------------------------------
+
+[USER]    💭: none
+yes, dev-workspace/plugins is source of truth, start with bin, hooks.json looks exactly the same as settings.json on my end.
+also hold off on th init stuff im going to make some wholesale changes in this space.
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Starting with `bin`. Let me re-read the real `hooks.json` once more (so I'm not arguing from a stale read) and confirm the script path, then write the launchers.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+echo "=== hooks.json (verbatim) ==="; cat -A plugins/dev-workspace/hooks/hooks.json | head -40
+echo ""; echo "=== confirm script paths ==="
+ls plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy 2>&1
+echo ""; echo "=== existing bin dirs? ==="; ls -la plugins/dev-workspace/ plugins/dev-deploy/ | grep -i bin || echo "no bin dirs yet"
+Description: Re-read hooks.json verbatim and confirm script paths
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/hooks/hooks.json
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+bin dirs already exist (empty). Writing both launchers now — resolved against your **actual** registry shape (single object per key, matched by `<plugin>@` prefix so it survives marketplace renames).
+
+------------------------------------------------------------
+
+[WRITE TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/bin/dev-workspace
+
+------------------------------------------------------------
+
+[USER]    💭: none
+Umm is that the stub that I have to place on path myself (.local/bin)? the one that goes in plugin bin just points directly to the skill script because it is already on path for claude environments?
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Exactly right — I conflated the two. Two different launchers for two different environments:
+
+- **Plugin `bin/dev-workspace`** runs inside Claude where `bin/` is already on PATH. It doesn't need the registry at all — it just resolves its own location (it lives at `<plugin-root>/bin/`) and points at the sibling skill script. Dead simple, no jq, no `$CLAUDE_PLUGIN_ROOT` dependency.
+- **The registry-resolving one** (jq, `installed_plugins.json`) is only needed for *your* `~/.local/bin` so the command works in your plain terminal where nothing's on PATH. That's a separate file you place yourself — not the plugin `bin/`.
+
+So the plugin `bin/` one should be:
+
+------------------------------------------------------------
+
+[WRITE TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/bin/dev-workspace
+
+------------------------------------------------------------
+
+[WRITE TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/bin/dev-deploy
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+chmod +x plugins/dev-workspace/bin/dev-workspace plugins/dev-deploy/bin/dev-deploy
+ls -l plugins/dev-workspace/bin/dev-workspace plugins/dev-deploy/bin/dev-deploy
+echo "=== smoke test (run dev-workspace bin against this repo) ==="
+plugins/dev-workspace/bin/dev-workspace version 2>&1 | head -5
+Description: chmod +x and smoke test the bin launcher
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Both plugin `bin/` launchers are in place, executable, and the smoke test passes (`dev-workspace version` → `v1.0.0` via the bin → skill-script chain).
+
+What's done:
+- `plugins/dev-workspace/bin/dev-workspace` — self-locating pointer to `../skills/dev-workspace/scripts/dev-workspace`.
+- `plugins/dev-deploy/bin/dev-deploy` — same pattern for dev-deploy.
+
+Both preserve `$PWD` via `exec`, so the scripts' `find_project_root` still targets the caller's project.
+
+Separately, for **your** terminal (`~/.local/bin`), you'll want the registry-resolving variant I drafted earlier (jq against `installed_plugins.json`, matched by `dev-workspace@` prefix). That's yours to place — say the word and I'll drop a clean copy somewhere in the repo (e.g. alongside the old `stubs/readme.txt`) for you to symlink.
+
+Holding off on `init`/rules per your note. One thing still flagged but untouched: the `hooks.json` in `plugins/dev-workspace/` is missing the `{ "hooks": [...] }` wrapper that your `settings.json` has — want me to look at that next, or are you handling it in your wholesale changes?
+
+------------------------------------------------------------
+
+[USER]    💭: none
+do the local/bin stub again, it can go in with the renamed old one.
+hooks in settings.json and in hooks.json are exact mirrors, and the settings is battle tested.
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Noted on hooks — dropping it. Let me check the current `stubs/` dir so I place the local-bin launcher alongside the renamed old one correctly.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+ls -la plugins/dev-workspace/skills/dev-workspace/stubs/ 2>&1
+echo "--- dev-deploy stubs? ---"
+ls -la plugins/dev-deploy/skills/dev-deploy/stubs/ 2>&1
+Description: List current stubs dirs
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Old stub is renamed to `dev-workspace_old`. I'll add the new registry-resolving launcher as `stubs/dev-workspace` next to it.
+
+------------------------------------------------------------
+
+[WRITE TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/stubs/dev-workspace
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+chmod +x plugins/dev-workspace/skills/dev-workspace/stubs/dev-workspace
+echo "=== smoke test: does registry resolution find an installed dev-workspace? ==="
+jq -r '.plugins | to_entries | map(select(.key|startswith("dev-workspace@"))) | .[0].value | (if type=="array" then .[0] else . end) | .installPath // "NONE INSTALLED YET"' ~/.claude/plugins/installed_plugins.json
+echo "=== stubs dir now ==="; ls -la plugins/dev-workspace/skills/dev-workspace/stubs/
+Description: chmod and test registry resolution
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Done. The new `~/.local/bin` stub is in place at `stubs/dev-workspace`, executable, sitting next to `dev-workspace_old`.
+
+The registry-resolution query is validated against your real `installed_plugins.json` shape — it returned `NONE INSTALLED YET` simply because only `chat-tools` is currently installed; the `dev-workspace` plugin isn't yet. Once it is, the same query resolves its `installPath`. It matches by `dev-workspace@` prefix, so it's immune to whatever marketplace name you settle on, and handles both single-object and array registry values.
+
+Summary of this session's changes (all in `dev-workspace/plugins/`):
+- `dev-workspace/bin/dev-workspace` + `dev-deploy/bin/dev-deploy` — self-locating launchers for Claude's Bash PATH (smoke-tested OK).
+- `dev-workspace/skills/dev-workspace/stubs/dev-workspace` — registry-resolving launcher for your terminal's `~/.local/bin`.
+
+Untouched per your instructions: `init`/rules (your wholesale changes), `hooks.json` (you've confirmed it mirrors the battle-tested settings).
+
+Note: the dev-deploy `stubs/dev-deploy` is still the old walk-up version — say the word if you want a matching registry-resolving stub there too.
+
+------------------------------------------------------------
+
+[USER]    💭: none
+yes, do the dev-deploy stub too
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Let me read the user's modified dev-workspace stub so I mirror it exactly for dev-deploy.
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/stubs/dev-workspace
+
+------------------------------------------------------------
+
+[WRITE TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/stubs/dev-deploy
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/stubs/dev-deploy
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+The old dev-deploy stub is the walk-up version. I'll rename it to `_old` (mirroring dev-workspace), then write the new registry-resolving one.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+git mv plugins/dev-deploy/skills/dev-deploy/stubs/dev-deploy plugins/dev-deploy/skills/dev-deploy/stubs/dev-deploy_old 2>/dev/null || mv plugins/dev-deploy/skills/dev-deploy/stubs/dev-deploy plugins/dev-deploy/skills/dev-deploy/stubs/dev-deploy_old
+ls -la plugins/dev-deploy/skills/dev-deploy/stubs/
+Description: Rename old dev-deploy stub to _old
+
+------------------------------------------------------------
+
+[WRITE TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/stubs/dev-deploy
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+chmod +x plugins/dev-deploy/skills/dev-deploy/stubs/dev-deploy
+ls -la plugins/dev-deploy/skills/dev-deploy/stubs/
+echo "=== validate jq query against real registry ==="
+jq -r '.plugins | to_entries | map(select(.key|startswith("dev-deploy@"))) | .[0].value | (if type=="array" then .[0] else . end) | .installPath // "NONE INSTALLED YET"' ~/.claude/plugins/installed_plugins.json
+Description: chmod and validate dev-deploy stub query
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Done. The dev-deploy stub now mirrors dev-workspace exactly:
+
+- Old walk-up stub renamed to `stubs/dev-deploy_old`.
+- New registry-resolving `stubs/dev-deploy` written, executable, matched by `dev-deploy@` prefix.
+- jq query validated against your real registry (`NONE INSTALLED YET` — correct, dev-deploy isn't installed yet; resolution logic is sound).
+
+Both plugins now have the full launcher pair:
+- **`bin/<name>`** — self-locating, for Claude's Bash PATH.
+- **`skills/<name>/stubs/<name>`** — registry-resolving, for your `~/.local/bin`, with the prior version preserved as `*_old`.
+
+------------------------------------------------------------
+
+[USER]    💭: none
+cool my local path launcher works
+
+------------------------------------------------------------
+
+[USER]    💭: none
+cool my local path launcher works
+now I wanted to do a refit of init. as I also have to transfer over the dev/ folder in templates to the project root. due to not pulling in the repo any more this has to be manually created. 
+Also we may have to look at `workspace remote` and `rebuild` commands
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Let me gather the relevant pieces before proposing a refit — the init reference, and the `init`/`rebuild`/`remote` implementations in the script.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+echo "=== templates/dev tree (what must land in project root) ==="
+find templates/dev -type f -o -type d | sort
+echo ""
+echo "=== init.md reference ==="
+cat references/init.md
+Description: Show templates/dev tree and init reference
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+This is the legacy distribution model laid bare: the `workspace` remote + `rebuild` + `pull_workspace_on_init` existed to push the dev-workspace *system* into each project. The plugin replaces all of that. Let me read the actual implementation before proposing.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+echo "=== function/case map (init, rebuild, remote, scaffold, workspace) ==="
+grep -nE 'cmd_(init|rebuild)|^[a-z_]+\(\)|init\)|rebuild\)|setup_workspace_origin|pull_workspace|scaffold|workspace.*remote|"workspace"' scripts/dev-workspace | head -60
+Description: Map init/rebuild/remote functions in script
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+sed -n '485,720p' scripts/dev-workspace
+Description: Read cmd_init, init_scaffold, init_write, init_check
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+echo "=== cmd_rebuild ==="; sed -n '1911,1978p' scripts/dev-workspace
+echo ""; echo "=== WORKSPACE_REMOTE in load_config ==="; grep -n "WORKSPACE_REMOTE" scripts/dev-workspace
+echo ""; echo "=== config template: setup_workspace_origin + workspace lines ==="
+grep -n "workspace\|setup_workspace_origin\|pull_workspace_on_init\|rebuild" templates/workspace-config.yml
+Description: Read cmd_rebuild and config template remote sections
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+I now have the full legacy picture. Here's what the old model did and what the plugin breaks:
+
+**How `dev/` used to arrive:** `init --write` with `pull_workspace_on_init: true` called `rebuild`, which `git pull`ed the `dev/` tree from the `workspace` remote (`dilberryhoundog/dev-workspace.git`, `--allow-unrelated-histories`) into the project. The `workspace` remote and `rebuild` existed *purely* to distribute the dev-workspace system into each project.
+
+**What the plugin changes:** the system (scripts, references, templates) now lives in the plugin cache and updates via `/plugin update`. So the git-remote distribution path is dead. The `dev/` *workspace scaffold* must instead be copied locally from `templates/dev/`.
+
+## Proposed refit
+
+**`init` (scaffold)** — copy the whole `templates/dev/` tree into `<project>/dev/` (idempotent, never overwrite existing files via `rsync --ignore-existing`), plus `workspace-config.yml` as today. This replaces the old repo-pull entirely.
+
+**`init --write`** — keep the still-relevant bits (merge driver, `.git/info/exclude`, `.dockerignore`, `dev/run` chmod). Remove the `setup_workspace_origin` / workspace-remote / `pull_workspace_on_init` block.
+
+**Config template** — drop `repo_config.workspace` and `init.setup_workspace_origin`; fix comments that reference rebuild/workspace remote.
+
+Three genuine forks I want your call on before writing code:
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Excellent direction on all three. Let me confirm one runtime detail (how `info.txt` is used) so I don't mis-classify it as scaffold, then I'll lay out the restructure.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+echo "=== references to templates/ and info.txt in script ==="
+grep -n "templates\|info.txt\|SKILL_DIR\|PLUGIN_ROOT" scripts/dev-workspace
+echo ""
+echo "=== what reads info.txt ==="
+sed -n '247,255p' scripts/dev-workspace
+Description: Find info.txt and template references in script
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+`info.txt` is a runtime asset (the `info` splash), not scaffold — it stays with the script. Here's the restructure I propose, which directly answers your "config-driven, not hardwired" and "mirror the install directory" instincts.
+
+## Template layout — mirror the project
+
+Consolidate the two template folders into **one scaffold root that mirrors the project's install layout**. The tree *is* the manifest — add a file under `templates/`, it scaffolds. Nothing hardwired in the script.
+
+```
+plugins/dev-workspace/
+  templates/                         ← scaffold root, mirrors project root
+    dev/
+      project/.keep
+      workspace/
+        workspace-config.yml         ← moved here (was skills/.../templates/)
+        WORKSPACE.md, README.md, context/, plans/, prompts/, …
+    .claude/
+      rules/                         ← moved from plugins/.../templates/rules/
+        context.md
+        dev-workspace_commands.md
+        dev-workspace_guide.md
+  skills/dev-workspace/
+    assets/info.txt                  ← runtime splash (moved out of templates/)
+    scripts/ references/ stubs/ SKILL.md
+```
+
+**Moves:** `skills/.../templates/dev/` → `templates/dev/`; `skills/.../templates/workspace-config.yml` → `templates/dev/workspace/`; `templates/rules/` → `templates/.claude/rules/`; `skills/.../templates/info.txt` → `skills/.../assets/info.txt`.
+
+## `init` behavior
+
+`init` = `rsync --ignore-existing templates/ → <project-root>/` (never overwrites). One pass scaffolds `dev/` **and** `.claude/rules/` **and** the config file — because the config now lives inside the mirrored tree, it bootstraps itself.
+
+The config-driven escape hatch (for sources that *don't* mirror, e.g. project-specific extras) — optional, defaults off:
+```yaml
+init:
+  scaffold:
+    mirror: true        # copy the whole templates/ tree (default)
+    extra:              # optional source→dest beyond the mirror
+      # - { from: examples/ci, to: .github/workflows }
+```
+
+## Script changes
+- Add `PLUGIN_ROOT="$(cd "$SKILL_DIR/../.." && pwd)"`, `TEMPLATES_DIR="$PLUGIN_ROOT/templates"`.
+- `cmd_info` → read `assets/info.txt`.
+- `init_scaffold` → mirror-rsync + optional `extra`.
+- **Remove** `cmd_rebuild`, its dispatch case + help, the `setup_workspace_origin`/workspace-remote blocks in `init_write`/`init_check`, and `WORKSPACE_REMOTE` in `load_config`.
+- Config template → drop `repo_config.workspace` + `init.setup_workspace_origin`; add `init.scaffold`; fix comments.
+
+One thing to flag: scaffolding `.claude/rules/*.md` will land **committable** files in the consumer's repo (unlike the old `.git/info/exclude` approach). That's intended for the rules to load per-project — just confirming you want them tracked.
+
+Good to execute this, or adjust the layout/config shape first?
+
+------------------------------------------------------------
+
+[USER]    💭: none
+rules are actually different per branch so i can drop in specific context. so yes commitable, but with a simple `dev-workspace commit` command.
+also should we be careful of the branch we are on when scaffolding? some main branches or pristine mirrors. this means if we are guaranteed on the parent branch we can actually overwrite with the scaffold to bring in new changes.
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Both are sharp points. Let me check how `commit` and branch vars work so I wire the rules into `commit_workspace` and gate scaffolding by branch correctly.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+echo "=== branch vars from load_config ==="; sed -n '132,180p' scripts/dev-workspace
+echo ""; echo "=== commit_workspace config section ==="; sed -n '105,135p' templates/workspace-config.yml
+echo ""; echo "=== cmd_commit ==="; sed -n '1355,1412p' scripts/dev-workspace
+Description: Read branch vars, commit_workspace config, cmd_commit
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Good — and `commit_workspace.directories` already lists `.claude` and `.gitattributes`, so per-branch rules are **already covered by `dev-workspace commit`**. No change needed there. ✓
+
+On branch-aware scaffolding — the key subtlety is **fork vs vanilla**:
+- **Fork repo:** `main_branch` (pristine mirror of upstream) ≠ `parent_branch` (e.g. `command`). Main must stay clean — never scaffold onto it.
+- **Vanilla repo:** `main_branch` == `parent_branch` == `main`. Workspace files *do* live on main — scaffolding there is correct.
+
+So the guard isn't "am I on main" but "am I on a **pristine** main" = `current == MAIN_BRANCH && MAIN_BRANCH != PARENT_BRANCH`.
+
+Proposed scaffold modes:
+- **`dev-workspace init`** (first-time, no config yet): permissive additive scaffold (`rsync --ignore-existing`) — it can't know branches because the config it's creating doesn't exist yet.
+- **`dev-workspace init`** (config exists): additive (`--ignore-existing`, never clobbers); **refused on pristine main**.
+- **`dev-workspace init --update`**: overwrite from templates to pull in changed system files (the old `rebuild`'s real purpose, now sourced from plugin templates). **Gated to `parent_branch` only.**
+
+The danger with `--update` overwrite: it would clobber `workspace-config.yml` (your edited repo URLs) and user content (`plans/`, `context/tree.md`, `history/`…). So `--update` needs a **preserve list** so it only refreshes system scaffold, never your data.
+
+Two calls before I build it:
+
+------------------------------------------------------------
+
+[USER]    💭: none
+NO parent branch always holds a blank slate copy of dev/workspace, so it can propagate cleanly through the workspaces when they are created. Also the dev/ folder doesn't have workspace-config in it. if you can find a command that will replace conflicting items but not clobber the whole dir would be good. we also end up with stuff in dev/project and dev/branches that need to be preserved.
+so enforce parent branch, update (including overwrite, but not clobber)
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Crystal clear now — and your structure removes the need for a preserve list entirely. The elegance:
+
+- **`workspace-config.yml` stays *out* of the `dev/` template tree** (kept as a separate scaffold item), so refreshing `dev/` never touches your edited config.
+- **`rsync` without `--delete`** = "replace conflicting, add new, never clobber." It only overwrites files present in the template, so `dev/project`, `dev/branches`, and any extra files survive automatically.
+- **Parent branch = blank slate**, so overwriting `dev/workspace` there is *correct* (it's what propagates to new workspaces).
+
+So: no preserve list, no scaffold config section — the layout + parent-enforcement + `rsync -a` (no `--delete`) does it. Final design:
+
+- `init` (additive): `rsync -a --ignore-existing` — bootstrap, never clobbers.
+- `init --update`: **enforce `parent_branch`** + clean tree, then `rsync -a` (overwrite-but-not-clobber) — the rebuild replacement.
+- `workspace-config.yml`: copied once on first init, never overwritten.
+
+Let me verify rsync's available, then do the file restructure.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: command -v rsync && rsync --version | head -1
+cd ~/Projects/dev-workspace/plugins/dev-workspace
+echo "=== before: layout ==="
+echo "-- skills templates --"; ls skills/dev-workspace/templates/
+echo "-- root templates --"; ls templates/
+Description: Verify rsync and show current template layout
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace
+set -e
+# 1. dev/ tree: skills templates -> plugin root templates
+git mv skills/dev-workspace/templates/dev templates/dev
+# 2. workspace-config.yml -> plugin root templates (separate scaffold item)
+git mv skills/dev-workspace/templates/workspace-config.yml templates/workspace-config.yml
+# 3. rules -> templates/.claude/rules
+mkdir -p templates/.claude
+git mv templates/rules templates/.claude/rules
+# 4. info.txt -> skills assets (runtime asset)
+mkdir -p skills/dev-workspace/assets
+git mv skills/dev-workspace/templates/info.txt skills/dev-workspace/assets/info.txt
+# 5. remove now-empty skills templates dir
+rmdir skills/dev-workspace/templates 2>/dev/null || true
+echo "=== after: scaffold root (templates/) mirrors project ==="
+find templates -maxdepth 3 | sort
+echo "=== skills/dev-workspace top ==="; ls skills/dev-workspace/
+Description: Restructure template folders
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Layout restructured cleanly. Now the script edits. Let me start with the header (PLUGIN_ROOT/TEMPLATES_DIR), `cmd_info`, and `load_config`.
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[USER]    💭: none
+hold the horses. the config file needs to stay with the skill, it get copied to dev workspace on initial init. the root template folder is more of a plugin template. restore skills/template or place in assets?
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Good catch — the config is skill-owned (copied once into the project), distinct from the plugin-root scaffold (rsync'd into the project on every update). I'll keep the semantic split clean:
+
+- `skills/dev-workspace/templates/workspace-config.yml` — **templates = copied-out artifacts** (the config, copied once on init).
+- `skills/dev-workspace/assets/info.txt` — **assets = runtime resources read in place** (the splash).
+- `plugins/dev-workspace/templates/` — plugin scaffold mirroring the project (`dev/`, `.claude/`).
+
+So I'll restore `skills/.../templates/` for just the config. Sound? Moving it back:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace
+mkdir -p skills/dev-workspace/templates
+git mv templates/workspace-config.yml skills/dev-workspace/templates/workspace-config.yml
+echo "=== skill templates ==="; ls skills/dev-workspace/templates/
+echo "=== skill assets ==="; ls skills/dev-workspace/assets/
+echo "=== plugin-root scaffold templates ==="; find templates -maxdepth 2 | sort
+Description: Move config back to skill templates
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Layout settled. Now the script edits — header first.
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now `cmd_info` (assets path) and `load_config` (drop WORKSPACE_REMOTE):
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now the core rewrite — `cmd_init`, `init_scaffold` (additive), and new `init_update` (parent-gated overwrite):
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now remove the workspace-remote block from `init_write` and `init_check`:
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now remove `cmd_rebuild` entirely, plus its dispatch case and help. Let me locate them precisely after the edits.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+grep -n "rebuild\|cmd_rebuild" scripts/dev-workspace
+Description: Locate remaining rebuild references
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+echo "=== help rebuild case (382-400) ==="; sed -n '382,400p' scripts/dev-workspace
+echo "=== help summary list (460-475) ==="; sed -n '460,475p' scripts/dev-workspace
+echo "=== cmd_rebuild start + end (1935-2010) ==="; sed -n '1935,1945p' scripts/dev-workspace; echo "..."; sed -n '2000,2015p' scripts/dev-workspace
+echo "=== dispatch (2210,2225) ==="; sed -n '2210,2225p' scripts/dev-workspace
+Description: Read regions around rebuild to remove
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Removing rebuild — help case, summary line, function, and dispatch. Then I'll add `--update` to init's help.
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now remove the `cmd_rebuild` function and its dispatch case:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+# show exact boundaries to delete the function block
+grep -n "^# REBUILD\|^cmd_rebuild()\|^# DEPLOY\|Workspace rebuilt" scripts/dev-workspace
+Description: Find rebuild function boundaries
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now update the `init` help case to document `--update`. Let me read it:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+sed -n '259,285p' scripts/dev-workspace
+Description: Read init help case
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now the config template — drop `repo_config.workspace` and `init.setup_workspace_origin`. Let me read those sections:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+sed -n '15,40p' templates/workspace-config.yml
+echo "..."; sed -n '76,90p' templates/workspace-config.yml
+Description: Read config template remote sections
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/templates/workspace-config.yml
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/templates/workspace-config.yml
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/templates/workspace-config.yml
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/templates/workspace-config.yml
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now syntax-check the script and smoke-test, plus verify no dangling references remain.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+echo "=== bash syntax check ==="; bash -n scripts/dev-workspace && echo "OK syntax"
+echo "=== dangling refs (should be empty) ==="
+grep -n "WORKSPACE_REMOTE\|cmd_rebuild\|setup_workspace_origin\|templates/info.txt\|SKILL_DIR/templates/dev" scripts/dev-workspace || echo "none"
+echo "=== smoke: version + info ==="
+./scripts/dev-workspace version
+echo "--- info (first 3 lines) ---"; ./scripts/dev-workspace info 2>&1 | head -3
+echo "=== help init ==="; ./scripts/dev-workspace help init 2>&1 | sed -n '1,14p'
+Description: Syntax check, dangling refs, smoke tests
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Syntax clean, no dangling refs, splash reads from `assets/`. Now a functional test of the scaffold in a throwaway dir — additive init, then parent-gated `--update`.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+SCRIPT="$PWD/scripts/dev-workspace"
+TMP=$(mktemp -d)
+cd "$TMP"
+git init -q && git commit -q --allow-empty -m init
+echo "=== 1. first init (scaffold) ==="
+"$SCRIPT" init 2>&1 | sed 's/^/  /'
+echo "=== resulting tree ==="
+find . -path ./.git -prune -o -type f -print | sort
+echo ""
+echo "=== 2. simulate user content + edited config, then re-run plain init (must NOT clobber) ==="
+echo "MY EDITS" >> dev/workspace/workspace-config.yml
+echo "user plan" > dev/workspace/plans/my-plan.md
+mkdir -p dev/branches && echo "archive" > dev/branches/keep.txt
+"$SCRIPT" init 2>&1 | sed 's/^/  /'
+echo "config still has MY EDITS? :"; grep -c "MY EDITS" dev/workspace/workspace-config.yml
+echo "user plan survives? :"; test -f dev/workspace/plans/my-plan.md && echo yes
+echo ""
+echo "=== 3. init --update on non-parent branch (should refuse) ==="
+git add -A && git commit -q -m scaffold
+git checkout -q -b feature/x
+"$SCRIPT" init --update 2>&1 | sed 's/^/  /'
+echo ""
+echo "=== 4. init --update on parent (main here) — overwrites template files, preserves extras ==="
+git checkout -q main
+echo "stale" > dev/workspace/WORKSPACE.md   # template file, should be refreshed
+"$SCRIPT" init --update 2>&1 | sed 's/^/  /'
+echo "WORKSPACE.md refreshed (no longer 'stale')? :"; head -1 dev/workspace/WORKSPACE.md
+echo "config untouched (MY EDITS intact)? :"; grep -c "MY EDITS" dev/workspace/workspace-config.yml
+echo "dev/branches preserved? :"; test -f dev/branches/keep.txt && echo yes
+echo "user plan preserved? :"; test -f dev/workspace/plans/my-plan.md && echo yes
+cd / && rm -rf "$TMP"
+Description: Functional test of scaffold/update in temp repo
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Let me run the test more conservatively (no `rm -rf`, scoped temp dir):
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: SCRIPT="~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace"
+TMP="/tmp/dwtest-$$"
+mkdir -p "$TMP" && cd "$TMP"
+git init -q && git commit -q --allow-empty -m init
+echo "=== 1. first init ==="; "$SCRIPT" init 2>&1 | sed 's/^/  /'
+echo "=== tree ==="; find . -path ./.git -prune -o -type f -print | sort
+Description: Test first init scaffold in temp repo
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+First init works — `dev/`, `.claude/rules/`, and config all scaffolded. Now no-clobber + update behavior:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: SCRIPT="~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace"
+TMP="/tmp/dwtest-$$"
+mkdir -p "$TMP" && cd "$TMP"
+git init -q && git commit -q --allow-empty -m init
+"$SCRIPT" init >/dev/null 2>&1
+# add user content + edit config
+echo "MY EDITS" >> dev/workspace/workspace-config.yml
+echo "user plan" > dev/workspace/plans/my-plan.md
+mkdir -p dev/branches && echo "archive" > dev/branches/keep.txt
+echo "=== 2. plain init re-run (no clobber) ==="; "$SCRIPT" init 2>&1 | sed 's/^/  /'
+echo "  config MY EDITS kept:"; grep -c "MY EDITS" dev/workspace/workspace-config.yml
+echo "  user plan kept:"; test -f dev/workspace/plans/my-plan.md && echo yes
+git add -A && git commit -q -m scaffold
+echo "=== 3. init --update on feature branch (refuse) ==="
+git checkout -q -b feature/x
+"$SCRIPT" init --update 2>&1 | sed 's/^/  /'
+echo "=== 4. init --update on parent/main (refresh, preserve) ==="
+git checkout -q main
+echo "stale" > dev/workspace/WORKSPACE.md
+git add -A && git commit -q -m stale
+"$SCRIPT" init --update 2>&1 | sed 's/^/  /'
+echo "  WORKSPACE.md refreshed:"; head -1 dev/workspace/WORKSPACE.md
+echo "  config MY EDITS intact:"; grep -c "MY EDITS" dev/workspace/workspace-config.yml
+echo "  dev/branches preserved:"; test -f dev/branches/keep.txt && echo yes
+echo "  user plan preserved:"; test -f dev/workspace/plans/my-plan.md && echo yes
+Description: Test no-clobber init and parent-gated update
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+All behaviors verified exactly as designed. Let me clean up the temp dirs.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: rm -rf /tmp/dwtest-* && echo "cleaned"
+Description: Remove temp test dirs
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+No problem — I'll leave the `/tmp/dwtest-*` scratch dirs for the OS to reap (you can `rm -rf /tmp/dwtest-*` if you want them gone now).
+
+## Init refit complete — all verified
+
+**Layout** (semantic split):
+- `plugins/dev-workspace/templates/` — project-mirroring scaffold (`dev/`, `.claude/rules/`), rsync'd in.
+- `skills/dev-workspace/templates/workspace-config.yml` — skill-owned config, copied once.
+- `skills/dev-workspace/assets/info.txt` — runtime splash, read in place.
+
+**`init` behavior** (tested):
+- `init` — copies config once (never clobbered) + `rsync --ignore-existing` the scaffold. Additive, safe anywhere. ✓
+- `init --update` — **enforced on `parent_branch`**, clean-tree required, then `rsync -a` (no `--delete`): refreshes changed template files, preserves `workspace-config.yml`, `dev/branches`, `dev/project`, and all user content. ✓
+- Refused correctly on a feature branch. ✓
+- Fork/vanilla safe: on vanilla (`parent==main`), update runs on main; on a fork it's gated to `command`, keeping pristine main untouched.
+
+**Removed:** `cmd_rebuild` (function, dispatch, help, summary), the `workspace` git remote (`repo_config.workspace`, `init.setup_workspace_origin`, `pull_workspace_on_init`), and `WORKSPACE_REMOTE` from `load_config`. Config template comments updated.
+
+`bash -n` clean, no dangling references, splash/version/help all working.
+
+Per-branch rules need no extra wiring — `commit_workspace.directories` already includes `.claude`, so `dev-workspace commit` captures them.
+
+Want me to do the equivalent pass on **dev-deploy** (it has the same `stubs/`, and its own `templates/` + references), or stop here?
+
+------------------------------------------------------------
+
+[USER]    💭: none
+commit this first
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+git status --short
+echo "=== current branch ==="; git branch --show-current
+Description: Check git status and branch
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+echo "=== full status incl untracked ==="; git status --short --untracked-files=all | grep -iE "bin/|stubs/" || echo "no bin/stubs in status"
+echo "=== are bin/stubs tracked/committed? ==="
+git ls-files plugins/dev-workspace/bin plugins/dev-deploy/bin plugins/dev-workspace/skills/dev-workspace/stubs plugins/dev-deploy/skills/dev-deploy/stubs
+echo "=== recent log ==="; git log --oneline -5
+Description: Check bin/stub tracking and recent commits
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+The bin/stubs are already committed (255315a) — so this commit is just the init refit + template restructure. Staging the two modified files (renames are already staged from `git mv`) and committing:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+git add plugins/dev-workspace/skills/dev-workspace/scripts/dev-workspace \
+        plugins/dev-workspace/skills/dev-workspace/templates/workspace-config.yml
+echo "=== staged for commit ==="; git status --short | grep -vE '^ ' | wc -l | xargs echo "staged files:"
+git status --short | grep -E '^[^ ]' | head -30
+echo "=== unstaged remaining (should be none relevant) ==="; git status --short | grep -E '^ ' || echo "none"
+Description: Stage modified files, verify staging
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+All 23 files staged, nothing unrelated left unstaged. Committing:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+git commit -m "🏗️ refactor(dev-workspace): plugin-native init scaffold, drop git-remote rebuild" \
+  -m "Restructure templates so the plugin root templates/ mirrors the project layout (dev/, .claude/) and acts as the scaffold source. workspace-config.yml stays skill-owned (copied once, never overwritten); info.txt moves to skills assets/ as a runtime resource." \
+  -m "init: additive 'rsync --ignore-existing' scaffold that never clobbers existing files." \
+  -m "init --update: new parent-branch-gated refresh ('rsync -a', no --delete) that overwrites changed template files but preserves workspace-config.yml, dev/project, dev/branches, and user content. Replaces the old git-remote rebuild." \
+  -m "Remove cmd_rebuild, the 'workspace' git remote, setup_workspace_origin, pull_workspace_on_init, and WORKSPACE_REMOTE — system updates now flow through /plugin update + init --update."
+echo "=== result ==="; git log --oneline -1
+Description: Commit the init refit
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Committed as `8edd9bb` on `convert-to-plugin` — 23 files, +87/−142 (net simpler). Git tracked all the template moves as pure renames (100% similarity), so history stays clean.
+
+Ready for the dev-deploy pass whenever you are — it has the same `templates/` + `references/` structure to align, though note dev-deploy never had a `rebuild`/workspace-remote, so its refit is mostly the template-layout mirror (if it even needs project scaffolding) rather than the init logic rework.
+
+------------------------------------------------------------
+
+[USER]    💭: none
+lets do the dev-deploy pass, pretty sure the same stub changes are needed. you can sweep for features that can be integrated into plugins, like hooks, extra scripts etc.
+I think dev deploy creates its folder instead of spawning it from git, but we might be able to do something in this space.
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+I'll sweep dev-deploy comprehensively before changing anything — structure, how its script scaffolds, hooks, and any plugin-integratable features.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-deploy
+echo "=== full plugin tree ==="; find . \( -type f -o -type l \) | sort
+echo ""; echo "=== plugin.json ==="; cat .claude-plugin/plugin.json
+echo ""; echo "=== hooks dir ==="; ls -la hooks/ 2>&1; find hooks -type f 2>/dev/null -exec echo "--- {} ---" \; -exec cat {} \;
+Description: Full dev-deploy plugin tree and manifests
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+`bin/dev-deploy` and the registry stub are already done from earlier. The interesting parts are how it scaffolds `dev/deploy/` and what's integratable. Let me read the script's structure, init/scaffold, and SKILL.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy
+echo "=== SKILL.md ==="; cat SKILL.md
+echo ""; echo "=== script: function/case map ==="
+grep -nE '^[a-z_]+\(\)|resolve_skill_dir|SKILL_DIR|templates|scaffold|init|create|mkdir|cp |rsync|dev/deploy' scripts/dev-deploy | head -60
+Description: Read dev-deploy SKILL and map script
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Let me read the remaining pieces — the scaffold/hooks init, `run_hook`, the config template, and confirm the bin/stub state.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy
+echo "=== init_scaffold + init_hooks (396-458) ==="; sed -n '396,458p' scripts/dev-deploy
+echo ""; echo "=== run_hook (192-236) ==="; sed -n '192,236p' scripts/dev-deploy
+echo ""; echo "=== bin/dev-deploy ==="; cat ../../bin/dev-deploy
+echo ""; echo "=== stubs present ==="; ls skills 2>/dev/null; ls stubs 2>/dev/null || ls -1 ./stubs 2>/dev/null; ls -1 stubs 2>/dev/null; ls -1 ./
+Description: Read init scaffold/hooks, run_hook, bin
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Full sweep done. Here's the picture — dev-deploy is in much better shape than dev-workspace was.
+
+## Status: core migration already complete
+- `bin/dev-deploy` ✓ and `stubs/dev-deploy` (registry-resolving) + `dev-deploy_old` ✓ — both done in the earlier pass.
+- **dev-deploy already scaffolds locally** (`init` = `mkdir` + `cp` from skill templates). It never pulled from a git remote, so there's *no* rebuild/workspace-remote baggage to remove. The thing you suspected ("creates its folder instead of spawning from git") is already true and plugin-correct.
+- `run_hook` runs project-owned scripts at `dev/deploy/hooks/` — fine in the plugin model.
+
+So no structural rework is forced. What the sweep *did* surface:
+
+## Findings & opportunities
+
+**1. Bug — `SKILL.md` frontmatter.** It has:
+```yaml
+tools:
+  - exec
+```
+`tools`/`exec` aren't valid Claude Code skill fields (the field is `allowed-tools`, and `exec` isn't a tool). This is silently ignored at best. Fix: remove it, or replace with `allowed-tools: Bash` if you want the deploy commands pre-approved (a permission choice).
+
+**2. Empty `hooks/` dir** at the plugin root — no `hooks.json`, does nothing. Either remove it, or use it for #4.
+
+**3. Minor consistency.** `init_scaffold` uses `project_root="$PWD"` instead of `find_project_root` fallback (like dev-workspace now does), so re-running `init` from a subdir scaffolds in the wrong place. One-line fix.
+
+**4. Real integratable feature — a PreToolUse guardrail.** The SKILL says *"Never run raw Kamal deploy commands."* A plugin PreToolUse hook (matcher `Bash`) could inspect the command, and when it sees raw `kamal deploy …` (or a `git merge` into the staging/production branch), warn or block with "use `dev-deploy deploy …`". This enforces the skill's hard rule deterministically instead of hoping the model obeys. This is exactly the "feature integratable into plugins" you invited.
+
+**5. The "folder space" idea.** Optionally align dev-deploy to dev-workspace's additive model: a project-mirroring `templates/` at the plugin root + `rsync --ignore-existing`, so new example hooks shipped in a future plugin update appear on `init` automatically. But deploy config/hooks are copy-once user-edited, with no blank-slate/branch-propagation need — so I'd *not* add `init --update`/parent-gating here. Low value; mention for completeness.
+
+Which of these do you want me to action?
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+You'd like to clarify before answering — what would you like to dig into? A few things I can expand on if useful:
+
+- **The `allowed-tools` choice** (finding #1): whether pre-approving `Bash` for this skill is desirable, and the permission trade-offs.
+- **The guardrail hook** (#4): exactly what it would match, how PreToolUse block/warn behaves, false-positive risk, and whether it should cover dev-workspace's "no raw git" rule too.
+- **The "folder space" / additive-templates idea** (#5): what it'd actually buy you and why I'm leaning against `init --update` for dev-deploy.
+- Anything about how these interact with the empty `hooks/` dir.
+
+What's on your mind?
+
+------------------------------------------------------------
+
+[USER]    💭: none
+What about the two hooks in skills/templates? how do these operate.
+1. ive removed it
+2. i always scaffold a plugins folders incase i want to fill in later. as the plugin develops
+3. yes good fix
+4. skill guidance is sometimes better than hardcoded guardrails. we can "actually" do kamal, but its much better if agents do the curated commands
+5. The templates idea is a good one. what if i want some claude rules to apply inside deploy repo's? deliver through plugin. overwrite items. The difference with this is that dev deploy doesn't need different rules per branch. .claude is statica across the repo.
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Let me read those two hook templates to answer your question precisely.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy
+for h in templates/hooks/backup-db templates/hooks/refresh-db; do echo "########## $h ##########"; cat "$h"; echo; done
+echo "=== SKILL.md frontmatter now (confirm user removed tools:) ==="; sed -n '1,8p' SKILL.md
+Description: Read hook templates and current SKILL frontmatter
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+**How the two hook templates operate:** they're example *deploy-lifecycle* scripts (not Claude hooks). `dev-deploy init --hooks` copies them from `skills/.../templates/hooks/` into the project at `dev/deploy/hooks/` (chmod +x). `deploy-config.yml` maps logical names (`hooks.backup_db`, `hooks.refresh_db`) to those paths, and at deploy time `run_hook` execs the configured script with env vars injected (`DEPLOY_ENV`, `DEPLOY_SERVER_HOST/PORT`, `DEPLOY_BRANCH`, `DEPLOY_URL`):
+- `backup-db` → `deploy production` (ssh + `sqlite3_rsync` backup before deploy).
+- `refresh-db` → `setup --refresh-db` (copy prod DB → staging).
+
+They're user-customized once scaffolded → so they must stay **copy-once / opt-in**, never overwritten. Good — that confirms how to split things.
+
+Your point #5 is the key insight: **dev-deploy's `.claude` is static across the repo** (no per-branch variance), so unlike dev-workspace it's *safe to overwrite on update*, and needs **no branch gate**. So the plan:
+
+- **Skill-owned, copy-once:** `deploy-config.yml` + example `hooks/` (user edits these — never overwritten).
+- **Plugin-root mirror, refreshable:** `templates/.claude/` — deploy-repo Claude rules, delivered and overwritten on update.
+- `dev-deploy init` → config once + `rsync --ignore-existing` the `.claude` mirror (additive).
+- `dev-deploy init --update` → `rsync -a` the mirror (overwrite rules, no branch gate); leaves config + hooks untouched since they're not in the mirror.
+- `--hooks` stays opt-in as-is; `hooks/` dir kept (your #2); #3 fix included; no guardrail (#4).
+
+I'll build the plumbing and seed one starter rule (guidance to use curated `dev-deploy` commands — aligns with your #4) for you to edit. Let me read the header + init dispatch to edit precisely.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy
+echo "=== header (1-22) ==="; sed -n '1,22p' scripts/dev-deploy
+echo "=== cmd_init dispatch (378-395) ==="; sed -n '378,395p' scripts/dev-deploy
+echo "=== init help (240-256) ==="; sed -n '240,256p' scripts/dev-deploy
+Description: Read dev-deploy header, init dispatch, init help
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now the edits. Header first (add PLUGIN_ROOT/SCAFFOLD_DIR):
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy
+
+------------------------------------------------------------
+
+[READ TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now the dispatch (add `--update`) and `init_scaffold`/`init_hooks` (find_project_root + additive mirror) + new `init_update`:
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now the init help text:
+
+------------------------------------------------------------
+
+[EDIT TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now create the plugin-root scaffold mirror with a starter deploy-repo rule:
+
+------------------------------------------------------------
+
+[WRITE TOOL]
+File: ~/Projects/dev-workspace/plugins/dev-deploy/templates/.claude/rules/dev-deploy_guide.md
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Now syntax-check and functionally test the dev-deploy scaffold/update:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy
+echo "=== syntax ==="; bash -n scripts/dev-deploy && echo OK
+echo "=== help init ==="; ./scripts/dev-deploy help init 2>&1 | sed -n '1,9p'
+SCRIPT="$PWD/scripts/dev-deploy"
+TMP="/tmp/ddtest-$$"; mkdir -p "$TMP" && cd "$TMP"; git init -q && git commit -q --allow-empty -m init
+echo "=== init (additive) ==="; "$SCRIPT" init 2>&1 | sed 's/^/  /'
+echo "  tree:"; find . -path ./.git -prune -o -type f -print | sort | sed 's/^/    /'
+echo "=== edit config + rule, then --update (overwrite rule, keep config) ==="
+echo "MY CONFIG EDIT" >> dev/deploy/deploy-config.yml
+echo "stale rule" > .claude/rules/dev-deploy_guide.md
+"$SCRIPT" init --update 2>&1 | sed 's/^/  /'
+echo "  config edit kept:"; grep -c "MY CONFIG EDIT" dev/deploy/deploy-config.yml
+echo "  rule refreshed (not 'stale'):"; head -1 .claude/rules/dev-deploy_guide.md
+Description: Syntax check and functional test dev-deploy init/update
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Script lost its +x bit. Let me run via `bash` and re-test:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-deploy/skills/dev-deploy
+chmod +x scripts/dev-deploy
+SCRIPT="$PWD/scripts/dev-deploy"
+TMP="/tmp/ddtest-$$"; mkdir -p "$TMP" && cd "$TMP"; git init -q && git commit -q --allow-empty -m init
+echo "=== init (additive) ==="; bash "$SCRIPT" init 2>&1 | sed 's/^/  /'
+echo "  tree:"; find . -path ./.git -prune -o -type f -print | sort | sed 's/^/    /'
+echo "=== --update overwrites rule, keeps config ==="
+echo "MY CONFIG EDIT" >> dev/deploy/deploy-config.yml
+echo "stale rule" > .claude/rules/dev-deploy_guide.md
+bash "$SCRIPT" init --update 2>&1 | sed 's/^/  /'
+echo "  config edit kept:"; grep -c "MY CONFIG EDIT" dev/deploy/deploy-config.yml
+echo "  rule refreshed (not 'stale'):"; head -1 .claude/rules/dev-deploy_guide.md
+Description: chmod and re-test dev-deploy
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Both modes verified. Let me confirm the script's executable bit is intact in git (the earlier denial suggests a mode flip) and check overall status:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+echo "=== exec bits ==="; ls -l plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy | cut -c1-11
+git diff --stat -- plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy | tail -2
+echo "=== any mode change in git? ==="; git diff --summary -- plugins/dev-deploy/ 2>/dev/null || true
+echo "=== full dev-deploy status ==="; git status --short plugins/dev-deploy/
+echo "=== cleanup test dirs ==="; ls -d /tmp/ddtest-* 2>/dev/null
+Description: Verify exec bit and git status
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+`mode change 100644 => 100755` — the dev-deploy script was committed **non-executable**, which would break the `bin/` launcher's `exec`. Good that the chmod fixes it. Let me verify dev-workspace's scripts aren't hit by the same latent bug:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+echo "=== git-tracked modes for all plugin scripts/bin/stubs ==="
+git ls-files -s plugins/*/bin/* plugins/*/skills/*/scripts/* plugins/*/skills/*/stubs/* 2>/dev/null | awk '{print $1, $4}'
+Description: Check executable bits of all plugin scripts in git
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Two non-exec scripts that may be invoked directly. Let me check how `scripts/tree` is called (it's `100644`):
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace/plugins/dev-workspace/skills/dev-workspace
+grep -nE 'scripts/tree|scripts/cleanup|SKILL_DIR/scripts|\$.*tree"|bash .*tree|exec.*tree' scripts/dev-workspace | head
+Description: Check how tree/cleanup scripts are invoked
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+`scripts/tree` is run via `bash`, so `100644` is fine there — the only real mode bug was dev-deploy's script (exec'd by both bin and stub), now fixed to `100755`. Committing the dev-deploy pass:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+git reset -q  # clear any staged state
+git add plugins/dev-deploy/skills/dev-deploy/SKILL.md \
+        plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy \
+        plugins/dev-deploy/templates/.claude/rules/dev-deploy_guide.md
+echo "=== staged ==="; git status --short | grep -E '^[A-Z]'
+echo "=== unstaged remaining ==="; git status --short | grep -E '^ ' || echo none
+Description: Stage dev-deploy pass files
+
+------------------------------------------------------------
+
+[USER]    💭: none
+what is happening?
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+I was about to commit the dev-deploy pass, but stopped — let me explain where things stand. Nothing's committed yet.
+
+**What I changed for dev-deploy (working tree, uncommitted):**
+1. `SKILL.md` — your removal of the invalid `tools: exec` frontmatter.
+2. `scripts/dev-deploy` — header (`PLUGIN_ROOT`/`SCAFFOLD_DIR`), `init` now additive (config copy-once + `rsync --ignore-existing` the `.claude` mirror), new `init --update` (overwrite rules, no branch gate), `init_scaffold`/`init_hooks` use `find_project_root`. Also its **executable bit** (`100644 → 100755`) — it was committed non-exec, which would break the `bin/`+stub `exec`.
+3. `templates/.claude/rules/dev-deploy_guide.md` — new starter deploy-repo rule.
+
+All tested: additive init scaffolds config + rule; `--update` refreshes the rule while preserving an edited config.
+
+**The command you just rejected** was the staging step. The part that may have looked alarming is `git reset -q` at the front — that only **unstages** (moves things out of the index); it does **not** touch your files or any commit. I added it to satisfy your global rule "before committing, unstage every other file except the ones you're committing." Then `git add` re-stages just the three dev-deploy files.
+
+I haven't run anything since you rejected it. Want me to:
+- proceed with the commit (I can drop the `git reset` and stage only the three files explicitly), or
+- hold off while you look at something?
+
+What's your concern?
+
+------------------------------------------------------------
+
+[USER]    💭: none
+you where talking about a bug?
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Yes — an executable-bit bug on the dev-deploy script.
+
+**The bug:** `plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy` was committed to git as mode `100644` (non-executable). Git tracks the exec bit, so anyone who installs the plugin gets a non-executable script.
+
+**Why it breaks:** both launchers run the script with `exec`, which requires the execute permission:
+- `bin/dev-deploy`: `exec "$SCRIPT" "$@"`
+- `stubs/dev-deploy`: `exec "$ROOT/$SCRIPT_REL" "$@"`
+
+With a `100644` script, that `exec` fails with "permission denied" — which is exactly what we hit during my test run a moment ago (`(eval):6: permission denied: .../scripts/dev-deploy`). So in a fresh plugin install, `dev-deploy` would be dead on arrival via either launcher.
+
+**The fix:** `chmod +x` brought it to `100755`, and git now shows `mode change 100644 => 100755` — so committing this change bakes the executable bit into the repo permanently.
+
+**Scope check I did:** I audited every plugin script/bin/stub's git mode. The only *exec'd* file missing its bit was this dev-deploy script. The other `100644` ones are safe because they're not exec'd directly — `scripts/tree` is run via `bash "$tree_script"` (no exec bit needed), and `stubs/*_old` / `readme.txt` aren't run at all. The dev-workspace main script and both `bin/` launchers were already `100755`.
+
+So it's a real latent bug, already fixed in the working tree — it just needs to land in the commit. Want me to go ahead and commit the dev-deploy pass (staging only the three files, no `git reset`)?
+
+------------------------------------------------------------
+
+[USER]    💭: none
+I just made a few changes, wana check em?
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+I'll diff your changes against what I last had, so I can see exactly what you touched.
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+echo "=== working-tree diff vs HEAD for dev-deploy script (init-related only) ==="
+git diff -- plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy | sed -n '1,200p'
+Description: Diff dev-deploy script vs HEAD
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+I see exactly what you changed — two help-text rewordings on the `init` lines:
+
+- `init` → "Scaffold deploy-config.yml (into dev/deploy/) + templates"
+- `init --update` → "Deliver plugin changes to a branch"
+
+Everything else matches the implementation. One small thing worth a sanity check on the wording: `--update` has **no branch gate** (it delivers to whatever branch you're on, since a deploy repo's `.claude` is static across branches). Your phrasing "to a branch" reads fine with that — you check out the target branch and run it. Just flagging so the help and behavior stay aligned.
+
+Let me confirm nothing else changed and it's still syntactically clean:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+echo "=== syntax ==="; bash -n plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy && echo OK
+echo "=== full dev-deploy working-tree status ==="; git status --short plugins/dev-deploy/
+echo "=== did the starter rule change? (diff vs my version) ==="; git status --short plugins/dev-deploy/templates/
+Description: Syntax check and full dev-deploy status
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Syntax is clean and everything's intact. Current state of the dev-deploy pass:
+
+- `SKILL.md` — modified (your `tools: exec` removal), unstaged
+- `scripts/dev-deploy` — modified (init refit + your help rewording + exec-bit fix), unstaged
+- `templates/.claude/rules/dev-deploy_guide.md` — new, already staged
+
+Your edits are purely the two help-text lines; the logic is unchanged and tested.
+
+Want me to commit the dev-deploy pass now? If so I'll stage just these three files (no `git reset` — I'll explicitly `git add` them) and commit with a message covering: plugin-native init scaffold + `init --update` delivery, `.claude` rule template, `find_project_root` fix, and the executable-bit fix.
+
+------------------------------------------------------------
+
+[USER]    💭: none
+commit this
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+git add plugins/dev-deploy/skills/dev-deploy/SKILL.md \
+        plugins/dev-deploy/skills/dev-deploy/scripts/dev-deploy \
+        plugins/dev-deploy/templates/.claude/rules/dev-deploy_guide.md
+echo "=== staged ==="; git status --short | grep -E '^[A-Z]'
+echo "=== unstaged remaining ==="; git status --short | grep -E '^ [A-Z]' || echo none
+Description: Stage the three dev-deploy files
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Three files staged, nothing else pending. Committing:
+
+------------------------------------------------------------
+
+[BASH TOOL]
+Command: cd ~/Projects/dev-workspace
+git commit -m "🏗️ refactor(dev-deploy): plugin-native init scaffold + .claude rule delivery" \
+  -m "init: additive scaffold — copies deploy-config.yml once (skill-owned) and rsyncs the plugin-root templates/ mirror (.claude rules) into the deploy repo without clobbering." \
+  -m "init --update: delivers refreshed plugin templates to the current branch ('rsync -a', no --delete); deploy-config.yml and dev/deploy/hooks/ stay untouched (skill-owned, outside the mirror). No branch gate — a deploy repo's .claude is static across branches." \
+  -m "Add templates/.claude/rules/dev-deploy_guide.md as a starter deploy-repo rule." \
+  -m "init_scaffold/init_hooks now use find_project_root so re-runs from a subdir target the right place." \
+  -m "Fix executable bit on scripts/dev-deploy (100644 -> 100755) — the bin/ and stub launchers exec it, so a non-exec script broke a fresh install." \
+  -m "Remove invalid 'tools: exec' SKILL.md frontmatter."
+echo "=== result ==="; git log --oneline -1; git show --stat --oneline HEAD | tail -6
+Description: Commit the dev-deploy pass
+
+------------------------------------------------------------
+
+[ASSISTANT 💬]
+Committed as `d255407` — 3 files, +80/−20, with the executable-bit fix captured as a mode change (`100644 → 100755`).
+
+The dev-deploy pass is complete:
+- **init** — additive scaffold (config copy-once + `.claude` mirror, never clobbers)
+- **init --update** — delivers refreshed plugin templates to the current branch, leaving config/hooks untouched
+- **starter rule** — `templates/.claude/rules/dev-deploy_guide.md` for you to edit
+- **fixes** — `find_project_root` for subdir re-runs, exec-bit, and the invalid frontmatter removed
+
+Both plugins are now consistent: `bin/` launcher + registry stub, plugin-native local scaffolding, and a project-mirroring `templates/` (dev-workspace branch-gated, dev-deploy ungated per your static-`.claude` point). Nothing left outstanding from this pass — let me know what's next.
+
+------------------------------------------------------------
+
+[USER] [SLASH COMMAND]
+/chat-tools:conversation-capture unknown
+
+------------------------------------------------------------
