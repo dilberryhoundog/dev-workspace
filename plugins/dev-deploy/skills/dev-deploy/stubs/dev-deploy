@@ -1,0 +1,47 @@
+#!/bin/bash
+# dev-deploy stub for ~/.local/bin (your plain terminal, outside Claude Code).
+#
+# Resolves the plugin's installed location, then execs the bundled skill script
+# WITHOUT changing cwd, so the script still acts on the project it was called
+# from (its find_project_root walks up from $PWD).
+#
+# Resolution order:
+#   1. $CLAUDE_PLUGIN_ROOT — set when invoked inside the plugin's own context.
+#   2. installed_plugins.json registry — match any key "dev-deploy@<marketplace>"
+#      so a marketplace rename doesn't break this.
+#
+# Install: symlink or copy this file to a dir on your PATH, e.g.
+#   ln -s "<plugin>/skills/dev-deploy/stubs/dev-deploy" ~/.local/bin/dev-deploy
+# Then `dev-deploy` works in any terminal and survives plugin version bumps.
+
+set -e
+
+SCRIPT_REL="skills/dev-deploy/scripts/dev-deploy"
+PLUGIN_PREFIX="dev-deploy@"          # matches any marketplace, survives renames
+REGISTRY="$HOME/.claude/plugins/installed_plugins.json"
+
+if ! command -v jq >/dev/null 2>&1; then
+    echo "❌ jq is required to locate the dev-deploy plugin" >&2
+    exit 1
+fi
+if [[ ! -f "$REGISTRY" ]]; then
+    echo "❌ Plugin registry not found at $REGISTRY (is the plugin installed?)" >&2
+    exit 1
+fi
+
+# Registry value per key may be a single object or an array of installs.
+ROOT="$(jq -r --arg p "$PLUGIN_PREFIX" '
+    .plugins
+    | to_entries
+    | map(select(.key | startswith($p)))
+    | .[0].value
+    | (if type == "array" then .[0] else . end)
+    | .installPath // empty
+' "$REGISTRY")"
+
+if [[ -z "$ROOT" || ! -f "$ROOT/$SCRIPT_REL" ]]; then
+    echo "❌ dev-deploy plugin not installed (run /plugin install)" >&2
+    exit 1
+fi
+
+exec "$ROOT/$SCRIPT_REL" "$@"

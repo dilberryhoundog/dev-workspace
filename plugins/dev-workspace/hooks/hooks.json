@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dev-workspace"
+          },
+          {
+            "type": "command",
+            "command": "dev-workspace tree"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "dev-workspace tree"
+          }
+        ]
+      }
+    ]
+  }
+}

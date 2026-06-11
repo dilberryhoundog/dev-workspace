@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Locate and run the dev-workspace skill script now that it's plugin-installed.
+# Resolves the plugin's install path from Claude Code's registry, then execs
+# the bundled script WITHOUT changing cwd — so it still acts on the project
+# the user invoked it from.
+
+PLUGIN_KEY="dev-workspace@your-marketplace"   # <plugin>@<marketplace>
+SCRIPT_REL="scripts/dev-workspace"            # path within the plugin
+REGISTRY="$HOME/.claude/plugins/installed_plugins.json"
+
+resolve_plugin_root() {
+    # 1) Running inside Claude Code? It's handed to us.
+    [[ -n "$CLAUDE_PLUGIN_ROOT" ]] && { printf '%s\n' "$CLAUDE_PLUGIN_ROOT"; return 0; }
+    # 2) Otherwise read the registry. Prefer an install whose projectPath
+    #    contains the cwd (project/local scope), else fall back to any record.
+    [[ -f "$REGISTRY" ]] || return 1
+    jq -r --arg key "$PLUGIN_KEY" --arg pwd "$PWD" '
+        (.plugins[$key] // [])
+        | ( map(select(.projectPath != null and ($pwd | startswith(.projectPath)))) + . )
+        | .[0].installPath // empty
+    ' "$REGISTRY"
+}
+
+ROOT="$(resolve_plugin_root)"
+if [[ -z "$ROOT" || ! -f "$ROOT/$SCRIPT_REL" ]]; then
+    echo "❌ dev-workspace plugin not installed (run /plugin install)" >&2
+    exit 1
+fi
+
+exec "$ROOT/$SCRIPT_REL" "$@"   # exec preserves $PWD; find_project_root() still works
