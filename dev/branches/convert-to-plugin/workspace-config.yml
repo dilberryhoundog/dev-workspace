@@ -1,0 +1,192 @@
+# workspace-config.yml — Dev Workspace Configuration
+#
+# Location: dev/workspace/workspace-config.yml
+# Created by: dev-workspace init --write
+#
+# Machine-read by the dev-workspace script. Drives all automation.
+# For branch context, status, and notes see: WORKSPACE.md
+#
+# Two repo types supported:
+#   Fork:    upstream is set, main_branch ≠ parent_branch (main stays pristine)
+#   Vanilla: upstream commented out, main_branch = parent_branch
+
+# ==============================================================================
+# REPO CONFIG
+# ==============================================================================
+# main_branch: The primary branch (default: main).
+# parent_branch: The branch that development branches are created from.
+#   Set to a second branch to enable the "pristine main" fork workflow.
+#   Set to the same value as main_branch for vanilla repos.
+# upstream_latest_to: Which local branch gets reset by 'dev-workspace latest
+#   --upstream'. Comment out to disable the --upstream flag entirely.
+#
+# origin: The origin remote URL.
+# upstream: The upstream (fork source) remote URL. Comment out for vanilla repos.
+
+repo_config:
+  main_branch: main
+  parent_branch: main # set to 'main' for vanilla repos, 'command' for forks
+  #  upstream_latest_to: main           # comment out for non forked repos
+
+  origin: https://github.com/dilberryhoundog/dev-workspace.git
+  #  upstream: https://github.com/<username>/<repo>.git       # comment out for non forked repos
+
+# ==============================================================================
+# WORKSPACE PROTECTION
+# ==============================================================================
+# Paths isolated per branch. During merge these paths are restored from the
+# parent's pre-merge state. During sync these paths prevent phantom deletions,
+# but allow workspace modifications to flow through.
+#
+# IMPORTANT: These directories MUST be identical across all branches.
+# Divergent protection lists between branches causes incorrect merge/sync behaviour.
+# Main owns the structure; feature branches inherit it via sync.
+#
+# Plain path prefixes (not globs). Comment out or remove paths to disable protection.
+
+workspace_protection:
+  directories:
+    - "dev/workspace"
+    - ".claude/rules"
+
+# ==============================================================================
+# INIT — Settings applied by 'dev-workspace init --write'
+# ==============================================================================
+# All settings are idempotent — safe to re-run after changes.
+# Comment out any section to skip it during init.
+#
+# git_ignore: Patterns written to .git/info/exclude. dev-workspace overwrites
+#   this file on init — ensure project ignores live elsewhere (.gitignore,
+#   ~/.config/git/ignore) or are included below.
+
+init:
+  git_ignore:
+    directories:
+      - "/dev/workspace/context/*tree.md"
+      - "/dev/project/"
+      - "/dev/run/"
+      # - "/.claude/*"               # uncomment for fork repos to keep workflow tools out of upstream
+      # - "!/.claude/rules/"         # re-include rules if .claude/* is ignored
+
+  # exclude_workspace_from_docker: Paths appended to .dockerignore if it exists.
+  exclude_workspace_from_docker:
+    directories:
+      - "/dev/"
+      - "/.claude/"
+
+# ==============================================================================
+# MERGE
+# ==============================================================================
+# Controls how branches merge back to parent.
+
+# strategy: --merge (default) or --squash.
+# For rebase workflows, use git rebase directly — the script does not protect workspace files during rebase.
+
+# archive_before_merge: If set, 'merge --check' verifies archive is current.
+
+# delete_branch_after_merge: Deletes local and remote branch after merge.
+
+merge:
+  strategy: "--merge"
+  # strategy: "--squash"
+  archive_before_merge: true
+  # delete_branch_after_merge: true     # WARNING!!! — branch deletion cannot be undone.
+
+# ==============================================================================
+# COMMIT WORKSPACE
+# ==============================================================================
+# Paths staged and committed by 'dev-workspace commit'. These are the workspace
+# files that travel with the branch — config, rules, plans, context, etc.
+# The commit message is used for all workspace commits.
+
+commit_workspace:
+  message: "📝 Workspace files updated!"
+  directories:
+    - "dev/workspace"
+    - ".claude"
+    - ".gitattributes"
+
+# ==============================================================================
+# ARCHIVE
+# ==============================================================================
+
+archive:
+  directory: "dev/branches"
+
+# ==============================================================================
+# DEPLOY
+# ==============================================================================
+# Push source branch to a deploy target.
+#   Remote deploy: Push to a separate deploy repo (e.g. fork → upstream).
+#   Local deploy:  Push/merge to a branch in the same repo.
+#                  Comment out 'remote' section for local deploys.
+
+# Docker handles excluding workspace dirs from the image via .dockerignore.
+# No worktree or directory stripping needed.
+
+# Comment out entire deploy section to disable deploy commands.
+# Comment out remote section to disable remote deploy.
+
+#deploy:
+#  deploy_source: command             # 'main' if vanilla repo or local deploy
+#  deploy_branch: deploy              # 'staging' or 'production' if local
+#
+#  remote:
+#    deploy_remote_url: https://github.com/<username>/<repo>.git
+#    deploy_remote_branch: command-mirror
+
+# ==============================================================================
+# TREE — Directory tree views for agent context
+# ==============================================================================
+# Generates tree.md files that provide agents with directory structure awareness.
+# The default tree auto-loads at session start via rules file reference.
+# Named trees are available on demand via 'dev-workspace tree --show'.
+
+# output_dir: Where tree files are written. Also the read path for --show.
+
+# ignores: Global ignore patterns applied to all trees.
+
+# default_tree: Writes to tree.md. Auto-loaded into session context.
+# Remove all paths for a whole-project tree from root.
+
+# named_trees: Each key writes to <key>-tree.md. Discovered via --show.
+
+tree:
+  output_dir: dev/workspace/context
+
+  ignores:
+    - "node_modules"
+    - ".git"
+    - "__pycache__"
+    - ".DS_Store"
+    - "*.pyc"
+    - ".next"
+    - ".nuxt"
+    - "vendor/bundle"
+    - "tmp"
+    - "coverage"
+
+  default_tree:
+    name: workspace overview
+    description: Core workspace and project structure
+    paths:
+      - dev/workspace
+      #      - .claude
+      - skills
+      - dev-workspace
+      - hetzner-server
+      - openclaw
+    # depth: 3
+    # ignores:
+    #   - "*.log"
+
+  # named_trees:
+  #   models:
+  #     name: models
+  #     description: Database models and schema
+  #     paths:
+  #       - app/models
+  #       - db
+  #     depth: 4
+  #     # ignores:
+  #     #   - "*.tmp"
