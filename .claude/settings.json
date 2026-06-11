@@ -1,4 +1,7 @@
 {
   "outputStyle": "default",
-  "plansDirectory": "./dev/workspace/plans"
+  "plansDirectory": "./dev/workspace/plans",
+  "enabledPlugins": {
+    "dev-workspace@DBHD-Plugins": true
+  }
 }
