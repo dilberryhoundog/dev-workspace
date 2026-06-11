@@ -1,11 +1,18 @@
+---
+name: workspace overview
+description: Core workspace and project structure
+---
+
 dev/workspace
 ├── context
 │   ├── .keep
 │   └── tree.md
 ├── filebox
+│   ├── launcher
 │   └── README.txt
 ├── history
-│   └── .keep
+│   ├── .keep
+│   └── 226fafb2_convert-skills-to-plugins.txt
 ├── plans
 │   ├── .keep
 │   ├── architectural.md
@@ -21,15 +28,12 @@ dev/workspace
 │   └── .keep
 ├── tasks
 │   └── .keep
-├── CLAUDE.md
 ├── README.md
+├── workspace-config.yml
 └── WORKSPACE.md
-docs  [error opening dir]
-app  [error opening dir]
-config  [error opening dir]
-db  [error opening dir]
-lib  [error opening dir]
-test  [error opening dir]
-public  [error opening dir]
+skills  [error opening dir]
+dev-workspace  [error opening dir]
+hetzner-server  [error opening dir]
+openclaw  [error opening dir]
 
-9 directories, 17 files
+9 directories, 19 files
