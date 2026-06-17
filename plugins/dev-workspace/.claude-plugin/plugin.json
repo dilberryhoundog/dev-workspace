@@ -15,5 +15,8 @@
     "sync",
     "archive",
     "merge"
+  ],
+  "dependencies": [
+    "chat-tools"
   ]
 }

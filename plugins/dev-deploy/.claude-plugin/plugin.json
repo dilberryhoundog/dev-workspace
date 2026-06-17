@@ -6,5 +6,8 @@
     "name": "dilberryhoundog",
     "email": "tech@grahams.coffee"
   },
-  "keywords": ["dev deploy", "dd", "deploy", "stage", "staging", "production"]
+  "keywords": ["dev deploy", "dd", "deploy", "stage", "staging", "production"],
+  "dependencies": [
+    "dev-workspace"
+  ]
 }
