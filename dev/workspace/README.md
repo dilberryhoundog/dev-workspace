@@ -1,159 +1,145 @@
-# Dev Workspace
+# Dev Workspace — Reference
 
-A great team-focused workspace ready to shape, build, store and reveal context to claude.
+The logistical reference for this workspace: setup, commands, directories, hooks and lifecycle. For the project pitch and feature tour, see the repository root `README.md`.
 
-## Installation
+A workspace is a clean, per-branch home for the context a coding session produces — plans, research, reviews, conversations, scratch files and discoveries — stored consistently and synced safely back to the project.
 
-### Prerequisites
+## Setup
 
-- Ruby 3.0+
-- [claude_hooks](https://github.com/gabriel-dehan/claude_hooks) gem
+### 1. Install the plugin
+
+Inside Claude Code:
+
+```
+/plugin marketplace add dilberryhoundog/agent-library
+/plugin install dev-workspace@DBHD-Plugins
+```
+
+### 2. Initialise the project
+
+From the project root:
 
 ```bash
-gem install claude_hooks
+dev-workspace init          # scaffold dev/workspace/workspace-config.yml (never overwrites)
 ```
 
-### Directory Setup
+### 3. Configure
 
-1. Copy the `dev/workspace/` template to a main or "parent" branch of your repository
-2. Overwrite `.claude/` directory in your main or "parent" branch
-3. If using Rails, place `gem "claude_hooks"` in a Gemfile in the root of your project and run `bundle install`
-4. run `chmod +x ./dev/run/setup-workspace && ./dev/run/setup-workspace` to initialise the setup script. This is a one-time setup only, can delete the file afterwards. Sets up a 'workspace' remote and merge protection rules for .gitattributes
+Edit `dev/workspace/workspace-config.yml`. The key block is `repo_config`:
 
-If this causes conflicts, copy sections manually.
-I recommend not mixing hook systems.
-Use only 'Claude_hooks' or don't use it all.
+**Vanilla repo** (your own project):
 
-### Keeping workspace up to date
-
-In a project root terminal session. run `dev/run/pull-workspace` to pull the latest changes from upstream.
-
-Or alternatively use the `workspace:sync-workspace` command in Claude Code.
-
-### Hook Configuration
-
-If you want to maintain your settings without overwriting. Just copy this section to your settings.json
-
-Add to `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/entrypoints/session_start.rb"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/entrypoints/user_prompt_submit.rb"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/entrypoints/session_end.rb"
-          }
-        ]
-      }
-    ]
-  }
-}
+```yaml
+repo_config:
+  main_branch: main
+  parent_branch: main
+  origin: https://github.com/you/your-project.git
+  # upstream:           # commented out
 ```
 
-### Git Configuration
+**Fork repo** (contributing upstream, keeping `main` pristine):
 
-Add to `.gitattributes` on Main branch:
-
-```gitattributes
-dev/workspace/** merge=protect
-dev/workspace/project/** -merge
-.claude/config/** merge=ours
-README.md merge=ours
+```yaml
+repo_config:
+  main_branch: main
+  parent_branch: command
+  upstream_latest_to: main
+  origin: https://github.com/you/their-project.git
+  upstream: https://github.com/them/their-project.git
 ```
 
-Add to `.gitignore` on main branch:
+`workspace_protection.directories` lists the paths isolated per branch (default: `dev/workspace`, `.claude/rules`). These must be identical across all branches — main owns the structure, feature branches inherit it via sync.
 
-```gitignore
-dev/workspace/context/tree.md
-dev/project/
+### 4. Apply settings
+
+```bash
+dev-workspace init --write  # idempotent
+dev-workspace init --check  # verify settings are applied
 ```
 
-### Context Configuration
+`--write` configures the `merge.protect` driver, `.gitattributes` merge strategies, `.git/info/exclude` paths, the `workspace` git remote, `.dockerignore`, and makes `dev/run/` scripts executable.
 
-Create `.claude/config/config.json`:
-(The tree folders are setup for rails codebases, adjust as needed)
+### Keeping up to date
 
-```json
-{
-  "contextPreLoad": [
-    "dev/workspace/WORKSPACE.md",
-    "dev/workspace/CLAUDE.md",
-    "dev/workspace/context/tree.md"
-  ],
-  "preLoadBegin": "Loading project context files...",
-  "preLoadSeparator": "\n\n------- Context File -------\n",
-  "preLoadEnd": "\n✓ Context loaded successfully",
-  "treeFolders": [
-    "dev",
-    "docs",
-    "app",
-    "config",
-    "db",
-    "lib",
-    "test"
-  ],
-  "treeExcludePatterns": [
-    "*.svg",
-    "*.jpg",
-    "*.webp"
-  ],
-  "treeOutputPath": "dev/workspace/context/tree.md"
-}
+Two layers update independently:
+
+- **Plugin code** (CLI, skills, hooks) — managed through Claude Code's plugin manager (`/plugin`).
+- **Project templates** (the scaffolded `dev/workspace/`, rules, config) — refreshed with `init --update`:
+
+```bash
+git checkout <parent_branch>    # init --update only runs on the parent branch
+dev-workspace init --update     # rsync new template files in (workspace-config.yml untouched)
+dev-workspace commit            # propagate the refreshed scaffold
 ```
 
-## Workspace - How to
+## Command Suite
 
-### Setup your workspace
+The `dev-workspace` CLI is the control panel. Prefer it over raw `git`/`gh` for any workspace operation. Every command supports `--check` for a dry run, and `dev-workspace help <command>` for detail.
 
-- Starting on a clean main or parent branch. Use `/workspace:new-workspace` with a natural language description of what you intend to do with the branch. Claude will then name your new branch and setup your workspace.
-- Place the context you want Claude to see for all the work on the branch in `contextPreload:` in `config.json`.
-- Adjust the `treeFolders` and `treeExcludePatterns` so that your tree file is not bloated with uneccessary references, before being shown to Claude.
+| Command | Purpose |
+|---|---|
+| `dev-workspace` | Show the info splash |
+| `init` | Scaffold (`init`), apply (`--write`), verify (`--check`), refresh templates (`--update`) |
+| `new <name>` | Create a workspace branch (`new` alone lists branches) |
+| `push` | Push the current branch to origin (`--force-w-l` after rebase) |
+| `sync` | Merge parent into the current branch (`--rebase`, `--continue`, `--full`) |
+| `merge` | Merge the branch back to parent (run `--check` first; `--local`/`--github`) |
+| `commit` | Commit workspace files only |
+| `archive` | Snapshot the workspace to `dev/branches/` (`--sync`, `--no-commit`) |
+| `latest` | Integrate upstream/origin into main (`--upstream`, `--origin`) |
+| `transfer-latest` | Merge `main_branch` into `parent_branch` (fork repos) |
+| `deploy push` | Deploy-push workflow (with `dev-deploy`) |
+| `cleanup <platform>` | Process conversation exports (e.g. `claude-code`) |
+| `tree` | Generate directory trees (`--show` lists configured trees) |
+| `help` | Full command help |
 
-### Lets build!
+A few agent-facing slash commands complement the CLI: `/new-workspace`, `/discover`, `/research`, `/research-v2`, `/health`, `/workspace-PR`.
 
-- Start a new Claude Code terminal session
-- Kick off with a starting prompt but at the end say "show your working"
-- Claude will stop after showing you all of his working. This is a great opportunity to adjust yuor prompt based on claude response.
-- Once you Claude is confident to start building instead hit "show your options".
-- Claude will then reveal to you "hidden" options he wouldn't have considered.
-- After more back and forth, when again Claude is ready to build, say "show your strategy"
-- Claude will then tell you how he is going to implement the changes, revealing more hidden problems and issues.
-- Ask claude to "use your claude space" for him to reveal hidden thoughts about how the whole session is progressing.
-- Other options include "show your context" to have claude give you all his intended context sources, and "show your difficulties" to have him tell you about the current communication issues in the thread.
+## Directory System
 
-### Finishing off
+```txt
+dev/workspace/
+├── context/      # discovery output, tree views — Claude's map of the codebase
+├── filebox/      # scratch files / dump location
+├── history/      # captured conversations, summarised and named
+├── plans/        # planning docs (architectural.md, prd.md templates)
+├── prompts/      # prompt drafts (discover & research templates)
+├── research/     # research command output
+├── reviews/      # review artefacts
+├── tasks/        # referenceable task lists
+├── CLAUDE.md     # workspace + branch-only context, surfaced at session start
+└── WORKSPACE.md  # branch logistics checklist for managing the workspace
+```
 
-- Once your session is finished, use either `/clear` or `/exit` to end your session.
-- The workspace will then extract and format your conversation into the history folder. If renaming fails use the backup command `/workspace:rename-history <file>`
-- Commit all changes to the child branch.
-- At any time or once your branch is finished enter `/workspace:archive-workspace` to save your workspace as a snapshot in `dev/branches/`, commit to parent branch
-- Do `/workspace:merge-preflight` process to prepare branch.
-- Finally `/workspace:merge-branch` to merge your changes into the parent branch.
-- All the context and conversations you have generated will be preserved permanently, ready to reference or re-use.
+Archived workspaces from finished branches live in `dev/branches/{name}` and are visible from any branch — check there for prior context before starting work in a scope.
 
-### Other Tricks
+## Hooks
 
-- Load previous conversations into context using `@` tool. This allows you to keep conversations singular focused and then reuse for next steps. Prevents context bloat
+The plugin ships light SessionStart/SessionEnd hooks (`hooks/hooks.json`):
+
+- **SessionStart** — show the info splash and regenerate `context/tree.md`.
+- **SessionEnd** — regenerate `context/tree.md` so the next session starts current.
+
+`tree.md`, `CLAUDE.md` and `WORKSPACE.md` are surfaced to Claude at session start via the project's context rule, giving Claude a token-efficient map and the branch's purpose before any work begins.
+
+## Companion skills (`chat-tools` plugin)
+
+Two features that pair with workspaces ship in the `chat-tools` plugin:
+
+- **conversation-capture** — extract the session transcript into `history/`, summarised and named for reuse.
+- **magic-reply** — prompt triggers between `--` delimiters that reshape Claude's next reply: `-- show working --`, `-- use claude space --`, `-- show options --`, `-- show strategy --`, `-- show context --`, `-- show difficulties --`. Use one per turn.
+
+## Workspace Lifecycle
+
+1. **Start work** — from a clean parent branch, `dev-workspace new <name>` (or `/new-workspace` with a natural-language description). Push to initiate the remote branch. Set the branch purpose in `WORKSPACE.md`.
+2. **Before new work** — `dev-workspace sync` to pull parent changes; confirm prior work is recorded.
+3. **Build** — work the task; commit code normally; use the magic-reply triggers to shape context.
+4. **Capture** — end the session with `/clear` or `/exit` to capture the conversation into `history/`.
+5. **Finish** — `dev-workspace commit` (workspace files), `dev-workspace archive` if sharing context, then `dev-workspace merge --check` followed by `dev-workspace merge`.
+6. **Push** — `dev-workspace push` to publish.
+
+Generated context and conversations are preserved permanently in archives, ready to reference or reuse.
+
+### Tip
+
+Load a previous conversation into context with `@` to keep sessions singular and focused while reusing earlier context — preventing context bloat.

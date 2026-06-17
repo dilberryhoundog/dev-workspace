@@ -28,7 +28,7 @@ Ask for the user's guidance when these milestones are reached:
 
 **Core Commands**
 
-- init: Scaffold and apply workspace configs
+- init: Scaffold, apply, and refresh (--update) workspace configs
 - new: Create or list workspace branches
 - push: Push current branch to remote server
 - sync: Sync changes from parent branch
@@ -37,7 +37,6 @@ Ask for the user's guidance when these milestones are reached:
 - archive: Archive workspace context
 - latest: Integrate changes from upstream/origin to main
 - transfer-latest: Transfer latest changes to parent branch (fork repos only)
-- rebuild: Pull dev-workspace updates
 - deploy: Deploy push workflow
 - cleanup: Process conversation exports and other tasks
 - tree: Generate directory trees for context

@@ -19,6 +19,7 @@ dev-workspace                         Show info screen (default when no command 
 dev-workspace init                    Scaffold config files from skill template
 dev-workspace init --write            Apply config settings to project (idempotent)
 dev-workspace init --check            Verify settings are applied
+dev-workspace init --update           Refresh scaffold from plugin templates (parent branch only)
 
 dev-workspace new                     List branches from parent
 dev-workspace new <name>              Create new workspace branch
@@ -57,9 +58,6 @@ dev-workspace transfer-latest            Merge main_branch into parent_branch
 dev-workspace transfer-latest --check    Show status, verify main is current
 dev-workspace transfer-latest --ff       Allow fast-forward merge
 dev-workspace transfer-latest --continue Complete merge after resolving conflicts
-
-dev-workspace rebuild                 Pull latest dev-workspace updates
-dev-workspace rebuild --check         Check if updates are available
 
 dev-workspace deploy push             Push source to deploy target
 dev-workspace deploy push --check     Show deploy status

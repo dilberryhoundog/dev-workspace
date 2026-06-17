@@ -24,7 +24,6 @@ repo_config:
   parent_branch: command
   origin: https://github.com/you/their-project.git
   upstream: https://github.com/them/their-project.git
-  workspace: https://github.com/dilberryhoundog/dev-workspace.git
   upstream_latest_to: main
 ```
 
@@ -36,7 +35,6 @@ repo_config:
   parent_branch: main
   origin: https://github.com/you/your-project.git
   # upstream: false
-  workspace: https://github.com/dilberryhoundog/dev-workspace.git
 ```
 
 Key difference: fork repos have `upstream` set and `parent_branch` differs from `main_branch` (typically "command"). Vanilla repos comment out `upstream` and set both branches to "main".
@@ -49,13 +47,12 @@ dev-workspace init --write
 
 Reads the config and writes settings to the project:
 
-- Configures git merge driver (`merge.protect`) to prevent workspace files overwriting parent on merge
+- Registers the `merge.protect` git merge driver and adds a `.gitattributes` entry pinning `workspace-config.yml` to it (so the receiving branch's config survives a merge)
 - Adds paths to `.git/info/exclude` (local gitignore — not committed to repo)
-- Sets `.gitattributes` merge strategies for protected directories
-- Adds `/dev/` to `.dockerignore` if it exists (keeps workspace out of Docker images)
-- Adds/updates `workspace` git remote pointing to the dev-workspace repo
-- Optionally pulls workspace files on first init (`pull_workspace_on_init: true`)
-- Makes scripts in `dev/run/` executable if they exist
+- Adds workspace paths to `.dockerignore` if it exists (keeps workspace out of Docker images)
+- Makes scripts in `dev/run/` executable if that directory exists
+
+Workspace-directory protection during merge/sync is enforced at script level (not via `.gitattributes`) — see `references/merge.md` and `references/sync.md`.
 
 All settings are idempotent — running `--write` again applies any new config changes without duplicating existing entries.
 
@@ -89,6 +86,10 @@ Adds paths to `.git/info/exclude` (local-only gitignore). These files exist on d
 
 Adds workspace paths to `.dockerignore`. This is why directory stripping during deploy is unnecessary — Docker never copies workspace files into the image.
 
-### setup_workspace_origin
+## Refreshing Templates After a Plugin Update
 
-Adds a git remote named `workspace` pointing to the dev-workspace repo. This remote is used by `dev-workspace rebuild` to pull workspace system updates into the project.
+```bash
+dev-workspace init --update
+```
+
+The plugin (CLI, skill, hooks, and the bundled workspace templates) updates through Claude Code's plugin manager. To pull refreshed template files into a project, run `init --update` **on the parent branch**. It rsyncs the latest scaffold from the installed plugin's `templates/` directory — overwriting changed template files, adding new ones, and leaving your content (including `workspace-config.yml`) untouched. Follow with `dev-workspace commit` to propagate the refreshed scaffold.

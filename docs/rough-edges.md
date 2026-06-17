@@ -14,8 +14,8 @@ Known issues, limitations, and things that need work.
 
 ## chmod Blocked by Sandbox
 - Claude Code sandbox blocks `chmod +x` on skill scripts
-- User must manually `chmod +x` the script after scaffolding or rebuilding
-- Affects first-time setup and `dev-workspace rebuild`
+- User may need to manually `chmod +x` the script after a plugin install or update
+- Affects first-time setup and refreshing the plugin
 
 ## Hooks -> Skills Transition
 - The system has both a hook-based architecture and a skill-based architecture

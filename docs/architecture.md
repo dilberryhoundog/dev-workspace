@@ -79,9 +79,9 @@ Dev-deploy is a separate skill that handles infrastructure (Kamal deployments, s
 
 ## Distribution
 
-Dev-workspace is distributed as a git remote. Projects add a `workspace` remote pointing to the dev-workspace repo. `dev-workspace rebuild` pulls the latest skill files, hooks, scripts, and templates from this remote.
+Dev-workspace is distributed as a Claude Code plugin from the `DBHD-Plugins` marketplace. The plugin bundles the CLI, skill, hooks, and the workspace templates (its `templates/` scaffold). The plugin itself — code and bundled templates — updates through Claude Code's plugin manager.
 
-The init process sets up this remote automatically via `setup_workspace_origin` in the config.
+To get refreshed template files into a project after a plugin update, run `dev-workspace init --update` on the parent branch. It rsyncs the latest scaffold from the installed plugin's `templates/` directory into the project (overwriting changed template files, preserving your content and `workspace-config.yml`); `dev-workspace commit` then propagates them. No git remote is involved — `init`/`init --update` copy directly from the installed plugin.
 
 ## Evolution
 

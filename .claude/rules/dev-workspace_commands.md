@@ -16,9 +16,10 @@ This is a complete cookbook of all available commands for the Dev Workspace. Use
 
 | command                      | description                                   |
 |------------------------------|-----------------------------------------------|
-| `dev-workspace init`         | Scaffold config files from skill template     |
-| `dev-workspace init --write` | Apply config settings to project (idempotent) |
-| `dev-workspace init --check` | Verify settings are applied                   |
+| `dev-workspace init`          | Scaffold config files from skill template      |
+| `dev-workspace init --write`  | Apply config settings to project (idempotent)  |
+| `dev-workspace init --check`  | Verify settings are applied                    |
+| `dev-workspace init --update` | Refresh scaffold from plugin templates (parent branch only) |
 
 ## New
 
@@ -95,13 +96,6 @@ This is a complete cookbook of all available commands for the Dev Workspace. Use
 | `dev-workspace transfer-latest --check --json` | Machine-readable status                  |
 | `dev-workspace transfer-latest --ff`           | Allow fast-forward merge                 |
 | `dev-workspace transfer-latest --continue`     | Complete merge after resolving conflicts |
-
-## Rebuild
-
-| command                         | description                       |
-|---------------------------------|-----------------------------------|
-| `dev-workspace rebuild`         | Pull latest dev-workspace updates |
-| `dev-workspace rebuild --check` | Check if updates are available    |
 
 ## Deploy
 
