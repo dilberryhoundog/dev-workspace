@@ -454,6 +454,24 @@ cmd_help() {
             echo "Read references/cleanup.md for processing instructions."
             echo ""
             ;;
+        health)
+            echo ""
+            echo "dev-workspace health — Advisory plugin install-health check"
+            echo ""
+            echo "Usage:"
+            echo "  dev-workspace health              Run all install-health checks"
+            echo ""
+            echo "Read-only. Runs every executable check in hooks/health/ (sorted),"
+            echo "prints ✓/⚠/❌ findings + suggested commands, and exits non-zero only"
+            echo "when a blocker (❌) is found. Advisories (⚠) never fail."
+            echo ""
+            echo "Add a check: drop an executable NN-name script in hooks/health/."
+            echo "Contract: skills/dev-workspace/references/health.md"
+            echo ""
+            echo "Note: 'health' inspects the plugin install. For a repository"
+            echo "overview (branches, remotes, sync, PRs) use the /health command."
+            echo ""
+            ;;
         *)
             echo ""
             echo "dev-workspace v${VERSION} — Git workflow management"
@@ -473,6 +491,7 @@ cmd_help() {
             echo "  deploy              Deploy push workflow"
             echo "  cleanup             Process conversation exports"
             echo "  tree                Generate directory trees for context"
+            echo "  health              Advisory plugin install-health check"
             echo "  help                Show this help"
             echo ""
             echo "Fork management:"
@@ -2104,6 +2123,88 @@ cmd_tree() {
     bash "$tree_script" "$PROJECT_ROOT" "$CONFIG" "$action"
 }
 
+# ------------------------------------------------------------------------------
+# HEALTH
+# ------------------------------------------------------------------------------
+
+# Run the pluggable install-health checks under hooks/health/.
+#
+# Read-only: discovers + executes every check script (sorted), prints its
+# output, tracks the max severity, and exits non-zero (2) only if a check
+# returned 2 (blocker). Advisories (1) never fail the runner.
+#
+# Each check is run with these env vars exported:
+#   PLUGIN_ROOT  — absolute path to this plugin (.../plugins/dev-workspace)
+#   PLUGIN_NAME  — "dev-workspace"
+#   PROJECT_ROOT — absolute path to the dev-workspace project, or "" if none
+#   CONFIG       — absolute path to the project config file, or "" if none
+#
+# Contract + how to add a check: references/health.md
+cmd_health() {
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help|-h) cmd_help health; return ;;
+        esac
+    done
+
+    PLUGIN_NAME="dev-workspace"
+
+    # Resolve project context softly — health must work outside a project too.
+    if PROJECT_ROOT=$(find_project_root 2>/dev/null); then
+        CONFIG="$PROJECT_ROOT/$CONFIG_FILE"
+    else
+        PROJECT_ROOT=""
+        CONFIG=""
+    fi
+
+    run_health_checks
+}
+
+# Normalized pluggable health runner — shared output shape across plugins.
+# Discovers every executable in hooks/health/ (sorted), prints a per-check
+# header + the check's own glyph lines (indented), aggregates severity, and
+# prints a summary footer. Exits 2 only when a blocker (severity ≥2) is found.
+run_health_checks() {
+    local health_dir="$PLUGIN_ROOT/hooks/health"
+    echo ""
+    echo "══ ${PLUGIN_NAME} health ══"
+    echo ""
+    if [[ ! -d "$health_dir" ]]; then
+        echo "  ⚠ no checks found ($health_dir)"; echo ""; return 0
+    fi
+    local max=0 total=0 pass=0 adv=0 block=0 check name out rc
+    # NUL-delimited discovery so paths containing spaces survive (no word-split).
+    while IFS= read -r -d '' check; do
+        [[ -x "$check" ]] || continue
+        total=$((total + 1))
+        name=$(basename "$check"); name="${name#*-}"; name="${name//-/ }"
+        echo "▸ ${name}"
+        rc=0
+        out=$(
+            PLUGIN_ROOT="$PLUGIN_ROOT" PLUGIN_NAME="$PLUGIN_NAME" \
+            PROJECT_ROOT="${PROJECT_ROOT:-}" CONFIG="${CONFIG:-}" \
+            "$check" 2>&1
+        ) || rc=$?
+        printf '%s\n' "$out" | sed 's/^/  /'
+        echo ""
+        case "$rc" in 0) pass=$((pass+1));; 1) adv=$((adv+1));; *) block=$((block+1));; esac
+        [[ "$rc" -gt "$max" ]] && max=$rc
+    done < <(find "$health_dir" -maxdepth 1 -type f -print0 | sort -z)
+    if [[ "$total" -eq 0 ]]; then
+        echo "  ⚠ no executable checks in $health_dir"; echo ""; return 0
+    fi
+    echo "────────────────────────────────"
+    local summary="${total} checks · ${pass} ✓ · ${adv} ⚠ · ${block} ❌"
+    case "$max" in
+        0) echo "${summary} → all clear" ;;
+        1) echo "${summary} → advisories (exit 0)" ;;
+        *) echo "${summary} → blockers (exit 2)" ;;
+    esac
+    echo ""
+    [[ "$max" -ge 2 ]] && exit 2
+    return 0
+}
+
 # ==============================================================================
 # MAIN ROUTER
 # ==============================================================================
@@ -2159,6 +2260,9 @@ case "$COMMAND" in
         ;;
     tree)
         cmd_tree "$@"
+        ;;
+    health)
+        cmd_health "$@"
         ;;
     version|--version|-v)
         echo "dev-workspace v${VERSION}"

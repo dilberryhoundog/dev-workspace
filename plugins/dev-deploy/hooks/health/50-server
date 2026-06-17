@@ -1,0 +1,81 @@
+#!/bin/bash
+# health check: server
+#
+# Reports server health. If a custom health hook is configured it is run and
+# its result reflected. Otherwise, if a server host is configured, a basic SSH
+# disk check is performed. An unreachable server / failing hook is an ADVISORY,
+# never a blocker.
+#
+# The custom hook is invoked with the same DEPLOY_* environment the deploy
+# pipeline's run_hook provides (DEPLOY_SERVER_HOST etc.), and is existence- and
+# exec-bit-checked first — matching the pre-pluggable behaviour so existing
+# hooks keep working.
+#
+# Self-skips cleanly when not in a deploy project (CONFIG empty) or when no
+# server / hook is configured.
+#
+# Env in: CONFIG, PROJECT_ROOT, HOOK_HEALTH, SERVER_HOST, SERVER_PORT.
+# Exit:   0 = pass / skipped, 1 = advisory (unreachable / hook failed / missing).
+
+set -u
+
+CONFIG="${CONFIG:-}"
+PROJECT_ROOT="${PROJECT_ROOT:-}"
+HOOK_HEALTH="${HOOK_HEALTH:-}"
+SERVER_HOST="${SERVER_HOST:-}"
+SERVER_PORT="${SERVER_PORT:-22}"
+
+if [[ -z "$CONFIG" ]]; then
+    echo "✓ skipped — not a deploy project"
+    exit 0
+fi
+
+# Bound network/hook work so it can't hang health. macOS lacks `timeout`;
+# coreutils provides `gtimeout`. No wrapper if neither (unquoted on use).
+if command -v timeout >/dev/null 2>&1; then TIMEOUT="timeout 30"
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT="gtimeout 30"
+else TIMEOUT=""; fi
+
+# Custom health hook takes precedence.
+if [[ -n "$HOOK_HEALTH" ]]; then
+    hook_path="$PROJECT_ROOT/$HOOK_HEALTH"
+    if [[ ! -f "$hook_path" ]]; then
+        echo "⚠ health hook not found: $HOOK_HEALTH"
+        exit 1
+    fi
+    # Match run_hook: fix the exec bit if a fresh clone dropped it.
+    [[ -x "$hook_path" ]] || chmod +x "$hook_path" 2>/dev/null || true
+    # Provide the same DEPLOY_* env run_hook exported (the health hook is
+    # env-agnostic, so branch/url/env are empty — as the old call passed "").
+    if out=$(
+        DEPLOY_ENV="" \
+        DEPLOY_SERVER_HOST="$SERVER_HOST" \
+        DEPLOY_SERVER_PORT="$SERVER_PORT" \
+        DEPLOY_BRANCH="" \
+        DEPLOY_URL="" \
+        $TIMEOUT "$hook_path" 2>&1); then
+        printf '%s\n' "$out"
+        echo "✓ health hook passed"
+        exit 0
+    else
+        printf '%s\n' "$out"
+        echo "⚠ health hook reported a problem"
+        exit 1
+    fi
+fi
+
+# Basic SSH disk check when a server is configured.
+if [[ -n "$SERVER_HOST" ]]; then
+    if disk=$($TIMEOUT ssh -p "$SERVER_PORT" -o ConnectTimeout=5 "$SERVER_HOST" \
+        "df -h / | tail -1 | awk '{printf \"%s used of %s (%s free)\", \$3, \$2, \$4}'" \
+        2>/dev/null); then
+        echo "✓ Disk: $disk"
+        exit 0
+    else
+        echo "⚠ server unreachable ($SERVER_HOST)"
+        exit 1
+    fi
+fi
+
+echo "✓ skipped — no server configured"
+exit 0

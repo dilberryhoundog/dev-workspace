@@ -351,18 +351,26 @@ cmd_help() {
             echo "Configure hook paths in deploy-config.yml under 'hooks' section."
             ;;
         health)
-            echo "dev-deploy health — Health check for apps, branches, and server"
+            echo "dev-deploy health — Unified pluggable health check"
             echo ""
             echo "Usage:"
-            echo "  dev-deploy health               Run full health check"
+            echo "  dev-deploy health               Run all health checks (install + deploy)"
             echo ""
-            echo "Checks:"
-            echo "  Source    — Is source branch in sync with origin?"
-            echo "  Staging  — Staging sync with origin, source merge status"
-            echo "  Apps     — Kamal container status (up/down + uptime)"
-            echo "  Server   — Custom health hook, or basic disk check via SSH"
+            echo "  Read-only. Discovers every executable in the plugin's hooks/health/"
+            echo "  folder and runs them in sorted order, printing each under a ▸ header"
+            echo "  and a summary footer. Reports ✓ pass / ⚠ advisory / ❌ blocker. Exit"
+            echo "  is non-zero (2) only on a blocker. Shares one runner with"
+            echo "  dev-workspace health. See references/health.md for the contract."
             echo ""
-            echo "Custom server checks: configure hooks.health in deploy-config.yml."
+            echo "  Install checks (always run):"
+            echo "    10-plugin-scope  — enabled at user vs project scope"
+            echo "    20-stub-location — ~/.local/bin/dev-deploy resolves to the plugin"
+            echo ""
+            echo "  Deploy checks (self-skip when not a deploy project):"
+            echo "    30-kamal-apps    — Kamal container status (up/down + uptime)"
+            echo "    40-branch-sync   — source/staging sync + source→staging merge state"
+            echo "    50-server        — custom health hook, or basic disk check via SSH"
+            echo "  Custom server checks: configure hooks.health in deploy-config.yml."
             ;;
         *)
             echo "dev-deploy — Deployment pipeline automation"
@@ -377,7 +385,7 @@ cmd_help() {
             echo "  boot              Start application via Kamal"
             echo "  stop              Stop application via Kamal"
             echo "  setup             Run setup operations (DB refresh etc)"
-            echo "  health            Health check (apps, branches, server)"
+            echo "  health            Unified pluggable health (install + deploy checks)"
             echo "  help              Show this help"
             echo ""
             echo "Global options:"
@@ -1075,125 +1083,96 @@ cmd_setup() {
 }
 
 # ==============================================================================
-# HEALTH
+# HEALTH (install health — pluggable check runner)
 # ==============================================================================
+#
+# `dev-deploy health` runs read-only checks discovered from
+# "$PLUGIN_ROOT/hooks/health/" (one normalized runner shared with dev-workspace).
+# Install checks (10/20) plus deploy checks (30/40/50: Kamal apps, branch sync,
+# server) — the deploy checks self-skip when not in a configured deploy project.
+#
+# Check-script contract (see references/health.md):
+#   - Scripts live in hooks/health/, executable, named "NN-name", sorted order.
+#   - Runner exports: PLUGIN_ROOT, PLUGIN_NAME, PROJECT_ROOT (empty if none),
+#     CONFIG (project config path, empty if none), plus deploy vars
+#     (SOURCE_BRANCH, STAGING_BRANCH, PROD_BRANCH, PROD_KAMAL_DEST,
+#     STAGING_KAMAL_DEST, SERVER_HOST, SERVER_PORT, HOOK_HEALTH).
+#   - Each check prints lines prefixed "✓ ", "⚠ ", or "❌ " + a message, and may
+#     print an extra indented suggested command.
+#   - Check exit codes: 0 = pass, 1 = advisory, 2 = blocker.
+#   - Runner exit is non-zero (2) iff any check returned 2; advisories never fail.
+#   - READ-ONLY: checks only inspect + suggest, never mutate state.
+
+PLUGIN_NAME="dev-deploy"
 
 cmd_health() {
-    load_config
+    for arg in "$@"; do
+        case "$arg" in
+            help|--help|-h) cmd_help health; return ;;
+        esac
+    done
 
-    echo ""
-    echo "── Health Check ──"
-
-    # --- Apps ---
-    echo ""
-    echo "Apps"
-    echo ""
-
-    if command -v kamal &>/dev/null; then
-        if [[ -n "$PROD_KAMAL_DEST" ]]; then
-            local prod_dest="-d $PROD_KAMAL_DEST"
-        else
-            local prod_dest=""
-        fi
-
-        echo -n "→ Production: "
-        # shellcheck disable=SC2086
-        local prod_status
-        prod_status=$(kamal app details -q $prod_dest 2>/dev/null | sed -n 's/.*Up \([0-9]* [a-z]*\).*/\1/p' | head -1)
-        if [[ -n "$prod_status" ]]; then
-            echo "up ($prod_status)"
-        else
-            echo "down"
-        fi
-
-        if yaml_section_exists "$CONFIG" "staging" && [[ -n "$STAGING_KAMAL_DEST" ]]; then
-            echo -n "→ Staging:    "
-            local staging_status
-            staging_status=$(kamal app details -q -d "$STAGING_KAMAL_DEST" 2>/dev/null | sed -n 's/.*Up \([0-9]* [a-z]*\).*/\1/p' | head -1)
-            if [[ -n "$staging_status" ]]; then
-                echo "up ($staging_status)"
-            else
-                echo "stopped"
-            fi
-        fi
+    # Project context is best-effort: install health is useful even outside a
+    # configured deploy repo, so a missing config is not fatal here.
+    if PROJECT_ROOT=$(find_project_root 2>/dev/null); then
+        CONFIG="$PROJECT_ROOT/$CONFIG_FILE"
+        # Safe to populate deploy vars now that we know a config exists.
+        load_config
     else
-        echo "  Kamal not found — skipping app checks"
+        PROJECT_ROOT=""
+        CONFIG=""
     fi
 
-    # --- Branches ---
+    run_health_checks
+}
+
+# Normalized pluggable health runner — shared output shape across plugins.
+# Discovers every executable in hooks/health/ (sorted), prints a per-check
+# header + the check's own glyph lines (indented), aggregates severity, and
+# prints a summary footer. Exits 2 only when a blocker (severity ≥2) is found.
+# Deploy vars are exported so deploy checks (30/40/50) can read them.
+run_health_checks() {
+    local health_dir="$PLUGIN_ROOT/hooks/health"
     echo ""
-    echo "Branches"
+    echo "══ ${PLUGIN_NAME} health ══"
     echo ""
-
-    # Source sync with origin
-    if [[ -n "$SOURCE_BRANCH" ]]; then
-        git fetch origin "$SOURCE_BRANCH" --quiet 2>/dev/null || true
-        echo -n "→ $SOURCE_BRANCH: "
-        local local_head origin_head
-        local_head=$(git rev-parse "$SOURCE_BRANCH" 2>/dev/null || echo "missing")
-        origin_head=$(git rev-parse "origin/$SOURCE_BRANCH" 2>/dev/null || echo "missing")
-
-        if [[ "$local_head" == "missing" ]]; then
-            echo "not found locally"
-        elif [[ "$origin_head" == "missing" ]]; then
-            echo "no origin tracking"
-        elif [[ "$local_head" == "$origin_head" ]]; then
-            echo "in sync with origin"
-        else
-            echo "not in sync with origin"
-        fi
+    if [[ ! -d "$health_dir" ]]; then
+        echo "  ⚠ no checks found ($health_dir)"; echo ""; return 0
     fi
-
-    # Staging sync with origin
-    if [[ -n "$STAGING_BRANCH" ]]; then
-        git fetch origin "$STAGING_BRANCH" --quiet 2>/dev/null || true
-        echo -n "→ $STAGING_BRANCH: "
-        local ahead behind
-        ahead=$(git rev-list "origin/$STAGING_BRANCH".."$STAGING_BRANCH" --count 2>/dev/null || echo "?")
-        behind=$(git rev-list "$STAGING_BRANCH".."origin/$STAGING_BRANCH" --count 2>/dev/null || echo "?")
-        if [[ "$ahead" -eq 0 && "$behind" -eq 0 ]]; then
-            echo "in sync with origin"
-        else
-            local status=""
-            [[ "$ahead" -gt 0 ]] && status="${ahead} ahead"
-            [[ "$behind" -gt 0 ]] && status="${status:+$status, }${behind} behind"
-            echo "$status"
-        fi
-
-        # Source → staging merge status
-        if [[ -n "$SOURCE_BRANCH" ]]; then
-            local source_head staging_head
-            source_head=$(git rev-parse "$SOURCE_BRANCH" 2>/dev/null || echo "missing")
-            staging_head=$(git rev-parse "$STAGING_BRANCH" 2>/dev/null || echo "missing")
-            echo -n "→ $SOURCE_BRANCH → $STAGING_BRANCH: "
-            if [[ "$source_head" == "missing" || "$staging_head" == "missing" ]]; then
-                echo "cannot determine"
-            elif git merge-base --is-ancestor "$source_head" "$staging_head" 2>/dev/null; then
-                echo "up to date"
-            else
-                local unmerged
-                unmerged=$(git rev-list "$STAGING_BRANCH".."$SOURCE_BRANCH" --count 2>/dev/null)
-                echo "${unmerged} commit(s) not yet staged"
-            fi
-        fi
-    fi
-
-    # --- Server health hook ---
-    if [[ -n "$HOOK_HEALTH" ]]; then
-        run_hook "health" "$HOOK_HEALTH" ""
-    elif [[ -n "$SERVER_HOST" ]]; then
-        # Basic server checks if no custom hook
+    local max=0 total=0 pass=0 adv=0 block=0 check name out rc
+    # NUL-delimited discovery so paths containing spaces survive (no word-split).
+    while IFS= read -r -d '' check; do
+        [[ -x "$check" ]] || continue
+        total=$((total + 1))
+        name=$(basename "$check"); name="${name#*-}"; name="${name//-/ }"
+        echo "▸ ${name}"
+        rc=0
+        # Deploy vars default to empty so the runner is safe outside a project
+        # (load_config not called) and under a future `set -u`.
+        out=$(
+            PLUGIN_ROOT="$PLUGIN_ROOT" PLUGIN_NAME="$PLUGIN_NAME" \
+            PROJECT_ROOT="${PROJECT_ROOT:-}" CONFIG="${CONFIG:-}" \
+            SOURCE_BRANCH="${SOURCE_BRANCH:-}" STAGING_BRANCH="${STAGING_BRANCH:-}" PROD_BRANCH="${PROD_BRANCH:-}" PROD_KAMAL_DEST="${PROD_KAMAL_DEST:-}" STAGING_KAMAL_DEST="${STAGING_KAMAL_DEST:-}" SERVER_HOST="${SERVER_HOST:-}" SERVER_PORT="${SERVER_PORT:-}" HOOK_HEALTH="${HOOK_HEALTH:-}" \
+            "$check" 2>&1
+        ) || rc=$?
+        printf '%s\n' "$out" | sed 's/^/  /'
         echo ""
-        echo "Server ($SERVER_HOST)"
-        echo ""
-
-        echo "→ Disk:"
-        ssh -p "$SERVER_PORT" -o ConnectTimeout=5 "$SERVER_HOST" \
-            "df -h / | tail -1 | awk '{printf \"  %s used of %s (%s free)\n\", \$3, \$2, \$4}'" \
-            2>/dev/null || echo "  connection failed"
+        case "$rc" in 0) pass=$((pass+1));; 1) adv=$((adv+1));; *) block=$((block+1));; esac
+        [[ "$rc" -gt "$max" ]] && max=$rc
+    done < <(find "$health_dir" -maxdepth 1 -type f -print0 | sort -z)
+    if [[ "$total" -eq 0 ]]; then
+        echo "  ⚠ no executable checks in $health_dir"; echo ""; return 0
     fi
-
+    echo "────────────────────────────────"
+    local summary="${total} checks · ${pass} ✓ · ${adv} ⚠ · ${block} ❌"
+    case "$max" in
+        0) echo "${summary} → all clear" ;;
+        1) echo "${summary} → advisories (exit 0)" ;;
+        *) echo "${summary} → blockers (exit 2)" ;;
+    esac
     echo ""
+    [[ "$max" -ge 2 ]] && exit 2
+    return 0
 }
 
 # ==============================================================================

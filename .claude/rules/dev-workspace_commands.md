@@ -118,3 +118,9 @@ This is a complete cookbook of all available commands for the Dev Workspace. Use
 |-----------------------------|-------------------------------------------------|
 | `dev-workspace tree`        | Generate all configured trees (default + named) |
 | `dev-workspace tree --show` | List available trees (name + description)       |
+
+## Health
+
+| command                | description                                          |
+|------------------------|------------------------------------------------------|
+| `dev-workspace health` | Advisory plugin install-health check (read-only)     |

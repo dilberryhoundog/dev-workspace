@@ -16,7 +16,7 @@ Branch workspace context for Claude and humans. Not read by the dev-workspace sc
 
 ## Purpose
 
-Build an advisory, read-only `health` CLI command for both the dev-workspace and dev-deploy plugins. It runs pluggable check scripts from a `hooks/health/` folder and reports findings (`✓/⚠/❌`). First two checks: plugin install **scope** (project vs user) and **stub location**. The existing `/health` slash command (repo health) is renamed to `/overview` to free the name.
+Build an advisory, read-only `health` CLI command for both the dev-workspace and dev-deploy plugins. It runs pluggable check scripts from a `hooks/health/` folder and reports findings (`✓/⚠/❌`). First two checks: plugin install **scope** (project vs user) and **stub location**. The legacy `/health` slash command (repo health) is kept as-is — it doesn't conflict with the `dev-workspace health` CLI (different namespaces).
 
 ## Workflow
 
@@ -32,13 +32,14 @@ Build an advisory, read-only `health` CLI command for both the dev-workspace and
 ## Testing
 
 - [x] Requires testing
-  > Manual: run `dev-workspace health` / `dev-deploy health` in project-scope, user-scope, and non-dw dirs; verify statuses, exit codes, and pluggable discovery. Confirm `/overview` works after the rename.
+  > Manual: run `dev-workspace health` / `dev-deploy health` in project-scope, user-scope, and non-dw dirs; verify statuses, exit codes, and pluggable discovery. Confirm `/health` (legacy repo-health slash command) still works.
 
 ## Plans
 
 If selected please read the file at the start of the session before starting work
 
-- [x] `dev/workspace/plans/health-command.md`
+- [x] `dev/workspace/tasks/health-command-tasks.md` (start here)
+- [x] `dev/workspace/plans/health-command-plan.md`
 
 ## Discoveries
 
