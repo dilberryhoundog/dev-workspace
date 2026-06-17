@@ -22,6 +22,18 @@ SKILL_DIR=$(resolve_skill_dir)
 PLUGIN_ROOT=$(cd "$SKILL_DIR/../.." && pwd)
 SCAFFOLD_DIR="$PLUGIN_ROOT/templates"
 
+# Single source of truth for the version: plugin.json. Avoids drift between the
+# manifest and this script. Falls back to "unknown" if the manifest is missing
+# or unreadable.
+resolve_version() {
+    local manifest="$PLUGIN_ROOT/.claude-plugin/plugin.json"
+    [ -f "$manifest" ] || { echo "unknown"; return; }
+    local v
+    v=$(grep -m1 '"version"' "$manifest" | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')
+    echo "${v:-unknown}"
+}
+VERSION=$(resolve_version)
+
 # ==============================================================================
 # YAML PARSER (shared with dev-workspace)
 # ==============================================================================
@@ -1208,6 +1220,7 @@ case "$COMMAND" in
     setup)      cmd_setup "$@" ;;
     health)     cmd_health "$@" ;;
     help|--help|-h) cmd_help "$@" ;;
+    version|--version|-v) echo "dev-deploy v${VERSION}" ;;
     *)
         echo "❌ Unknown command: $COMMAND"
         echo "   Run: dev-deploy help"
