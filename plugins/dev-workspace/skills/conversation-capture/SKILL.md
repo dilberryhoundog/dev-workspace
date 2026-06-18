@@ -46,7 +46,8 @@ dev-workspace. Two non-zero exits signal a config problem:
 
 ## Summarize and Rename
 
-Using the full conversation context.
+Base the summary on the transcript file just written (and the current session if
+still in context).
 
 **Summary:** Write a 3-5 line summary of the conversation. The summary must be:
 
@@ -61,10 +62,12 @@ Read the first 20 lines of the transcript file to locate the `[SUMMARY]` block. 
 - If it contains a raw UUID (e.g. `f5d11e2f_f5d11e2f-89c8-...txt`), rename it with a descriptive slug
 - If it already has a descriptive name, keep it if still accurate, rename if the conversation has shifted focus
 
-Rename format: `<first-8>_slug.txt` where slug is 3-6 word kebab-case topic description.
+Rename format: `<first-8>_slug.txt` where slug is 3-6 word kebab-case topic
+description. Rename in place — keep the file in the same directory as the path
+the script returned.
 
 ```bash
-mv "<transcript-file>" "<output-dir>/<first-8>_slug.txt"
+mv "<transcript-file>" "$(dirname "<transcript-file>")/<first-8>_slug.txt"
 ```
 
 Report the final transcript file path.
