@@ -1,6 +1,6 @@
 {
   "name": "dev-deploy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A companion skill for dev-workspace. Efficient deployment using Kamal",
   "author": {
     "name": "dilberryhoundog",
