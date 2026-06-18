@@ -1,54 +1,118 @@
-# New Workspace — Creating Branches
+# New Workspace — Kicking Off a Branch
 
-## Workflow
+The full kickoff procedure: name the branch, verify readiness, create it, and
+initialise the workspace. Work through the steps in order. The `dev-workspace
+new` CLI is the engine — it is config-aware (reads `workspace-config.yml` for
+`parent_branch`, `main_branch`, and remotes), so prefer it over raw `git`.
 
+## Step 1 — Determine the purpose
+
+Parse the conversation for what the user is working on. If the purpose is not
+clear, ask: "What are you working on?" Use the purpose to choose the branch
+type and name.
+
+## Step 2 — Build the branch name
+
+Pick a type prefix:
+
+- `feature/` — new features, enhancements (default)
+- `fix/` — bug fixes, patches
+- `docs/` — documentation changes
+- `chore/` — maintenance, tooling, dependencies
+- `refactor/` — code restructuring
+- `workflow/` — CI/CD, process improvements
+
+Format: `{type}/{sanitized-description}` — lowercase, spaces → hyphens, strip
+special characters except hyphens, ~40 characters max. Example:
+`fix/login-redirect`.
+
+When the name or type is genuinely ambiguous, confirm it with the user
+(AskUserQuestion) before creating — a branch name is awkward to change later.
+
+## Step 3 — Check for existing / similar branches
+
+Run `dev-workspace new` with no name to list branches that originate from the
+parent:
+
+```bash
+dev-workspace new
 ```
-dev-workspace new                        # List existing branches (check names first)
-dev-workspace new <name> --check         # Verify parent branch readiness
-dev-workspace new <name>                 # Create the branch
+
+- If an exact match exists, ask whether to switch to it
+  (`git switch <name>`) instead of creating a duplicate.
+- If a similarly-named or similar-purpose branch exists, surface it and confirm
+  the user really wants a new one.
+
+## Step 4 — Preflight
+
+Verify readiness before creating:
+
+```bash
+dev-workspace new <name> --check
 ```
 
-## Pre-Creation Checks
+This reports three gates (config-aware — parent is read from config, not
+assumed):
 
-Before creating a branch, the agent MUST verify:
-
-1. **On parent branch** — must be on the branch configured as `parent_branch` in config. If not, switch to it first.
+1. **On parent branch** — must be on the configured `parent_branch`. If not,
+   switch first.
 2. **Working tree clean** — no uncommitted changes. Commit or stash first.
-3. **In sync with origin** — local parent should not be behind origin. If behind, run `dev-workspace latest --origin` (or `--upstream` for forks) first.
+3. **In sync with origin** — local parent not behind origin. If behind, run
+   `dev-workspace latest --origin` (or `--upstream` for forks) first.
 
-`new --check` verifies all three. If any fail, it reports the issue and exits non-zero.
+`--check` exits non-zero and prints a warning for any failed gate. Resolve
+failures before continuing. Do not create a branch with a dirty working tree.
 
-## Listing Branches
+## Step 5 — Create the branch
 
-`dev-workspace new` with no name lists all branches that originate from the parent branch. Use this to:
-- Check if a branch name already exists before creating
-- See what work is in progress
+```bash
+dev-workspace new <name>
+```
 
-## Creating
+This runs `git checkout -b <name> --no-track <parent>`.
 
-`dev-workspace new <name>` creates the branch with `git checkout -b <name> --no-track <parent>`.
+The `--no-track` is intentional — it stops the new branch from tracking the
+parent, so `git push` won't accidentally push to it. Do not "fix" this.
 
-The `--no-track` is intentional — it prevents the new branch from tracking the parent, so `git push` won't accidentally push to the parent branch.
+If `--check` reported the local parent is behind origin and the user still wants
+to branch from local state, confirm with them first, then use
+`dev-workspace new <name> --force` (skips the sync gate).
 
-## Branch Naming
+## Step 6 — Initialise WORKSPACE.md
 
-Use descriptive type/name prefixes:
-- `feature/add-user-auth`
-- `fix/login-redirect`
-- `refactor/extract-service`
-- `docs/api-reference`
+New branches inherit the parent's `dev/workspace/` state by design — shared
+context (style guides, architectural notes) propagates automatically. This is
+not a bug.
 
-## What Transfers to New Branches
+Edit `dev/workspace/WORKSPACE.md` for the new branch:
 
-New branches inherit the parent's workspace state. This is by design — custom context in the parent's `dev/workspace/` transfers to every new branch. Common shared context (style guides, architectural notes) lives on the parent and propagates automatically.
+- Set the branch **Name** and **Started** date.
+- Mark **Status** as In Progress.
+- Expand **Purpose** into a brief statement of the work.
+- Set the workflow type and, if tracking GitHub issues, record the issue
+  numbers.
 
-## Post-Creation
+Preserve all checkboxes and other structure — only fill in the placeholders.
 
-1. Update `dev/workspace/WORKSPACE.md` — set branch name, start date, purpose
-2. Start working, commit code normally with git
-3. Use `dev-workspace commit` for workspace-only commits
-4. Use `dev-workspace push` when ready to share
+## Step 7 — Pause, then commit the workspace
 
-## Force Creation
+Summarise and wait for the user before committing:
 
-`dev-workspace new <name> --force` skips the sync check. Use when you intentionally want to branch from local state even though origin has newer commits. The agent should confirm with the user before using `--force`.
+```
+Branch: <name>
+Workspace: dev/workspace/WORKSPACE.md initialised
+
+Pausing for you to review or adjust. Ready to commit the workspace?
+```
+
+After they confirm, commit the workspace files:
+
+```bash
+dev-workspace commit
+```
+
+## After kickoff
+
+- Commit code changes normally with `git`.
+- Use `dev-workspace commit` for workspace-only commits.
+- Use `dev-workspace push` when ready to share the branch.

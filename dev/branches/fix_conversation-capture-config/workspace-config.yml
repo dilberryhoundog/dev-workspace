@@ -25,10 +25,10 @@
 
 repo_config:
   main_branch: main
-  parent_branch: main                   # set to 'main' for vanilla repos, 'command' for forks
+  parent_branch: main # set to 'main' for vanilla repos, 'command' for forks
   #  upstream_latest_to: main           # comment out for non forked repos
 
-  origin: https://github.com/dilberryhoundog/<origin>.git
+  origin: https://github.com/dilberryhoundog/dev-workspace.git
   #  upstream: https://github.com/<username>/<repo>.git       # comment out for non forked repos
 
 # ==============================================================================
@@ -127,7 +127,6 @@ archive:
 # Comment out entire deploy section to disable deploy commands.
 # Comment out remote section to disable remote deploy.
 
-
 #deploy:
 #  deploy_source: command             # 'main' if vanilla repo or local deploy
 #  deploy_branch: deploy              # 'staging' or 'production' if local
@@ -152,7 +151,6 @@ archive:
 
 # named_trees: Each key writes to <key>-tree.md. Discovered via --show.
 
-
 tree:
   output_dir: dev/workspace/context
 
@@ -174,10 +172,7 @@ tree:
     paths:
       - dev/workspace
       #      - .claude
-      - skills
-      - dev-workspace
-      - hetzner-server
-      - openclaw
+      - plugins
     # depth: 3
     # ignores:
     #   - "*.log"

@@ -97,12 +97,12 @@ Read before first-time setup or adding dev-workspace to a new project. You need 
 - Each init section (gitignore, dockerignore, workspace remote) solves a specific problem — understanding why they exist prevents you from disabling something critical
 - Re-running init after config changes requires understanding idempotent behaviour
 
-### `references/new-workspace.md` — Workspace Branch Creation
-Read before creating any branch. You need this because:
+### `references/new-workspace.md` — Kicking Off a Workspace
+Read this before kicking off a new workspace branch — it is the full procedure, not just the `new` command. You need this because:
+- It covers naming, preflight, creation, and WORKSPACE.md initialisation as one flow — do not improvise with raw `git`
 - Branch creation has prerequisites (correct parent branch, clean tree, sync with remote) — skipping any causes problems downstream
 - The `--no-track` flag on creation is intentional and you must not "fix" it
 - Workspace files transfer from parent to new branches by design — this is not a bug
-- Post-creation steps set up the branch for proper workflow
 
 ### `references/push.md` — Pushing Branches
 Read when `push --check` reports anything other than "X commits to push". You need this because:
