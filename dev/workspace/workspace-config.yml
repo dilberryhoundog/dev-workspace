@@ -187,3 +187,25 @@ tree:
   #     depth: 4
   #     # ignores:
   #     #   - "*.tmp"
+
+# ==============================================================================
+# CONVERSATION CAPTURE
+# ==============================================================================
+# Settings for the conversation-capture skill, which parses the current Claude
+# Code session into a readable transcript saved under the workspace.
+#
+# output_dir: Target directory for transcripts (relative to project root).
+# include_thinking: Include assistant thinking blocks (true/false).
+# include_subagents: Include subagent (Task) results (true/false).
+# sanitize: Find/replace pairs applied after extraction. $ENV_VAR references
+#   expand at runtime. Add or comment out pairs as needed.
+
+conversation_capture:
+  output_dir: dev/workspace/history
+  include_thinking: false
+  include_subagents: false
+  sanitize:
+    - find: "$HOME"
+      replace: "~"
+    # - find: "MyName"
+    #   replace: "the user"
