@@ -4,7 +4,8 @@ This project uses **dev-workspace**, an integrated toolset for AI agents to oper
 
 # IMPORTANT!!!
 
-**TRUST THE DEV-WORKSPACE SKILL AND COMMANDS.** Use dev-workspace commands to manage your workspace.
+**READ THE DEV-WORKSPACE SKILL AND TRUST THE COMMANDS.** Use dev-workspace commands to manage your workspace.
+The commands are on $PATH they can be executed directly from your bash tool.
 
 ## Concept
 
@@ -12,13 +13,14 @@ dev-workspace creates isolated workspaces to keep work and context (plans, docs,
 Centralised snapshots (archives) of all workspaces, accessible project wide, allow high level insights. A CLI speeds up and makes all the actions needed to operate the dev-workspace system a pleasure to use.
 
 ## State
+
 dev-workspace keeps work and context syncronised, isolated, searchable across the whole project repository. It is important to keep the state of the workspace updated and fresh.
-Ask for the user's guidance when these milestones are reached: 
+Ask for the user's guidance when these milestones are reached:
 
 **Starting new feature / fix** --> Create a new workspace, push to remote to initiate branch, setup any workspace configs and context (in workspace.md)
-**Starting new work** --> Sync the workspace with parent branch. Check that previous work is recorded and saved. 
+**Starting new work** --> Sync the workspace with parent branch. Check that previous work is recorded and saved.
 **Work finished** --> Merge changes back to parent, Archive if needed, commit workspace files. push work to remote.
-**major features completed** --> Work finished protocol, deploy push if needed. 
+**major features completed** --> Work finished protocol, deploy push if needed.
 
 ## Tools
 
@@ -54,6 +56,7 @@ You have been seeded with context generated from **dev-workspace**.
 - **dev-workspace** — Core CLI for efficient and consistent workspace management.
 - **dev-deploy** — Kamal deployment pipelines (staging/production)
 - **magic-reply** — Trigger-based response styles
+- **conversation-capture** — Captures conversation history for reference, user invokes.
 
 ### Workspace Directories
 
@@ -86,8 +89,9 @@ Each history file has a max 5-line summary near the top and a descriptive filena
 ## Abbreviations & Chat references
 
 The user may use the following abbreviations or terms to refer to the dev-workspace system:
+
 - `dw` --> simple abreviation of "dev-workspace"
 - `the workspace`, `our workspace` --> dev-workspace is active. It refers to the "state" of the files and folders in the dev-workspace directory.  
-**examples**:
-- User sais: "lets get our workspace in order" --> run commands to bring the workspace in its proper state as per the config file. eg local branches pushed, archives updated (if config), workspace synced. work merged back to parent branch). 
+  **examples**:
+- User sais: "lets get our workspace in order" --> run commands to bring the workspace in its proper state as per the config file. eg local branches pushed, archives updated (if config), workspace synced. work merged back to parent branch).
 - User sais: "dw needs syncing" --> run dev-workspace command that syncs the workspace.
