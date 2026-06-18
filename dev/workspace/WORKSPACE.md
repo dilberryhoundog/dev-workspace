@@ -6,28 +6,28 @@ Branch workspace context for Claude and humans. Not read by the dev-workspace sc
 
 ## Branch
 
-**Name:**
-**Started:**
+**Name:** fix/dev-workspace-permissions
+**Started:** 2026-06-19
 **Status:**
 
-- [ ] In Progress
+- [x] In Progress
 - [ ] Discard (workspace and branch abandoned)
 - [ ] Complete (ready to merge)
 
 ## Purpose
 
-%% Claude: write a brief purpose statement when creating the workspace %%
+Ship a `permissions` block in the dev-workspace plugin's template `settings.json` (issue #9). Auto-allow the safe/routine commands (base/info, health, tree, cleanup, and full push/archive/commit/new) and the `--check` variants of the rest; route every mutating variant of sync/merge/latest/transfer-latest/deploy/init to `ask`. Removes the constant permission prompts for dev-workspace commands. Patterns rely on precise matching because Claude Code evaluates deny > ask > allow with no specificity override.
 
 ## Workflow
 
-- [ ] Quick (direct implementation)
+- [x] Quick (direct implementation)
 - [ ] Single plan (plan once, execute)
 - [ ] Multi-stage plan (iterative planning)
 
 ## Track Issues
 
-- [ ] Track GitHub issues
-    - <!-- Add issue numbers: #123, #456 -->
+- [x] Track GitHub issues
+    - #9
 
 ## Testing
 
