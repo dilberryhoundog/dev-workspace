@@ -1,0 +1,68 @@
+#!/bin/bash
+# health check: plugin install scope
+#
+# Inspects enabledPlugins in the user and project Claude settings to determine
+# whether this plugin is enabled at user scope, project scope, or not found.
+# Project scope is preferred: it keeps the plugin's SessionStart/SessionEnd
+# hooks from firing in unrelated projects.
+#
+# Matching is by "<PLUGIN_NAME>@" PREFIX so a marketplace rename never breaks
+# this check. READ-ONLY — inspects settings, suggests, never mutates.
+#
+# NOTE: keep this file byte-identical to the dev-workspace copy except the
+# PLUGIN_NAME fallback below — the runner always supplies PLUGIN_NAME, so the
+# only per-plugin difference is the standalone-debug default.
+#
+# Env in: PLUGIN_NAME (required), PROJECT_ROOT (empty if not in a project).
+# Exit:   0 = pass (project scope), 1 = advisory (user-only / not found).
+
+set -u
+
+PLUGIN_NAME="${PLUGIN_NAME:-dev-deploy}"
+USER_SETTINGS="$HOME/.claude/settings.json"
+PROJECT_SETTINGS=""
+[[ -n "${PROJECT_ROOT:-}" ]] && PROJECT_SETTINGS="$PROJECT_ROOT/.claude/settings.json"
+
+# Returns 0 if the settings file ENABLES "<PLUGIN_NAME>@..." for any marketplace.
+# enabledPlugins has two shapes:
+#   object  {"name@mkt": true}   -> enabled only when the value is boolean true
+#                                   (a key set to false means explicitly disabled)
+#   array   ["name@mkt", ...]    -> enabled by presence
+enabled_in() {
+    local file="$1"
+    [[ -f "$file" ]] || return 1
+    if command -v jq >/dev/null 2>&1; then
+        jq -e --arg p "${PLUGIN_NAME}@" '
+            (.enabledPlugins // {}) as $e
+            | if ($e | type) == "object" then
+                ($e | to_entries | map(select((.key | startswith($p)) and (.value == true))) | length > 0)
+              elif ($e | type) == "array" then
+                ($e | map(select(startswith($p))) | length > 0)
+              else false end
+        ' "$file" >/dev/null 2>&1
+    else
+        # Best-effort fallback when jq is unavailable: token presence only.
+        # Cannot distinguish an object entry set to false — jq is the accurate path.
+        grep -q "\"${PLUGIN_NAME}@" "$file"
+    fi
+}
+
+user_scope=false
+project_scope=false
+enabled_in "$USER_SETTINGS" && user_scope=true
+[[ -n "$PROJECT_SETTINGS" ]] && enabled_in "$PROJECT_SETTINGS" && project_scope=true
+
+if [[ "$project_scope" == true ]]; then
+    echo "✓ ${PLUGIN_NAME} enabled at project scope"
+    exit 0
+fi
+
+if [[ "$user_scope" == true ]]; then
+    echo "⚠ ${PLUGIN_NAME} enabled at user scope — hooks fire in every project"
+    echo "    claude plugin uninstall ${PLUGIN_NAME} --scope user && claude plugin install ${PLUGIN_NAME}@<marketplace> --scope project"
+    exit 1
+fi
+
+echo "⚠ ${PLUGIN_NAME} not found in enabledPlugins (user or project settings)"
+echo "    claude plugin install ${PLUGIN_NAME}@<marketplace> --scope project"
+exit 1

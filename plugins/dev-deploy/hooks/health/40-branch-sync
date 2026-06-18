@@ -1,0 +1,85 @@
+#!/bin/bash
+# health check: branch sync
+#
+# Reports the sync state of the configured branches:
+#   - source branch vs origin
+#   - staging branch ahead/behind origin
+#   - source → staging merge status (commits not yet staged)
+#
+# In sync / up to date is a pass; out of sync / unstaged commits are
+# ADVISORIES, never blockers.
+#
+# Self-skips cleanly when not in a deploy project (CONFIG empty).
+#
+# Env in: CONFIG, SOURCE_BRANCH, STAGING_BRANCH.
+# Exit:   0 = pass / skipped, 1 = advisory (out of sync).
+
+set -u
+
+CONFIG="${CONFIG:-}"
+SOURCE_BRANCH="${SOURCE_BRANCH:-}"
+STAGING_BRANCH="${STAGING_BRANCH:-}"
+
+if [[ -z "$CONFIG" ]]; then
+    echo "✓ skipped — not a deploy project"
+    exit 0
+fi
+
+severity=0
+
+# Source sync with origin
+if [[ -n "$SOURCE_BRANCH" ]]; then
+    git fetch origin "$SOURCE_BRANCH" --quiet 2>/dev/null || true
+    local_head=$(git rev-parse "$SOURCE_BRANCH" 2>/dev/null || echo "missing")
+    origin_head=$(git rev-parse "origin/$SOURCE_BRANCH" 2>/dev/null || echo "missing")
+
+    if [[ "$local_head" == "missing" ]]; then
+        echo "⚠ $SOURCE_BRANCH: not found locally"
+        severity=1
+    elif [[ "$origin_head" == "missing" ]]; then
+        echo "⚠ $SOURCE_BRANCH: no origin tracking"
+        severity=1
+    elif [[ "$local_head" == "$origin_head" ]]; then
+        echo "✓ $SOURCE_BRANCH: in sync with origin"
+    else
+        echo "⚠ $SOURCE_BRANCH: not in sync with origin"
+        severity=1
+    fi
+fi
+
+# Staging sync with origin
+if [[ -n "$STAGING_BRANCH" ]]; then
+    git fetch origin "$STAGING_BRANCH" --quiet 2>/dev/null || true
+    ahead=$(git rev-list "origin/$STAGING_BRANCH".."$STAGING_BRANCH" --count 2>/dev/null || echo "?")
+    behind=$(git rev-list "$STAGING_BRANCH".."origin/$STAGING_BRANCH" --count 2>/dev/null || echo "?")
+    if [[ "$ahead" == "?" || "$behind" == "?" ]]; then
+        echo "⚠ $STAGING_BRANCH: cannot determine (origin/$STAGING_BRANCH not available)"
+        severity=1
+    elif [[ "$ahead" == "0" && "$behind" == "0" ]]; then
+        echo "✓ $STAGING_BRANCH: in sync with origin"
+    else
+        status=""
+        [[ "$ahead" != "0" ]] && status="${ahead} ahead"
+        [[ "$behind" != "0" ]] && status="${status:+$status, }${behind} behind"
+        echo "⚠ $STAGING_BRANCH: $status"
+        severity=1
+    fi
+
+    # Source → staging merge status
+    if [[ -n "$SOURCE_BRANCH" ]]; then
+        source_head=$(git rev-parse "$SOURCE_BRANCH" 2>/dev/null || echo "missing")
+        staging_head=$(git rev-parse "$STAGING_BRANCH" 2>/dev/null || echo "missing")
+        if [[ "$source_head" == "missing" || "$staging_head" == "missing" ]]; then
+            echo "⚠ $SOURCE_BRANCH → $STAGING_BRANCH: cannot determine"
+            severity=1
+        elif git merge-base --is-ancestor "$source_head" "$staging_head" 2>/dev/null; then
+            echo "✓ $SOURCE_BRANCH → $STAGING_BRANCH: up to date"
+        else
+            unmerged=$(git rev-list "$STAGING_BRANCH".."$SOURCE_BRANCH" --count 2>/dev/null)
+            echo "⚠ $SOURCE_BRANCH → $STAGING_BRANCH: ${unmerged} commit(s) not yet staged"
+            severity=1
+        fi
+    fi
+fi
+
+exit "$severity"

@@ -1,0 +1,64 @@
+#!/bin/bash
+# health check: kamal app status
+#
+# Queries Kamal for production (and staging, if configured) app status and
+# reports whether each is up. A down/unreachable app is an ADVISORY, never a
+# blocker — health should observe, not gate.
+#
+# Self-skips cleanly when not in a deploy project (CONFIG empty) or when the
+# kamal CLI is not installed.
+#
+# Env in: CONFIG, PROD_KAMAL_DEST, STAGING_KAMAL_DEST.
+# Exit:   0 = pass / skipped, 1 = advisory (down / unreachable / kamal missing).
+
+set -u
+
+CONFIG="${CONFIG:-}"
+PROD_KAMAL_DEST="${PROD_KAMAL_DEST:-}"
+STAGING_KAMAL_DEST="${STAGING_KAMAL_DEST:-}"
+
+if [[ -z "$CONFIG" ]]; then
+    echo "✓ skipped — not a deploy project"
+    exit 0
+fi
+
+if ! command -v kamal >/dev/null 2>&1; then
+    echo "⚠ kamal not found — skipping app status"
+    exit 1
+fi
+
+# Bound the kamal SSH calls so an unreachable host can't hang health.
+# macOS lacks `timeout`; coreutils provides `gtimeout`. No wrapper if neither.
+if command -v timeout >/dev/null 2>&1; then TIMEOUT="timeout 10"
+elif command -v gtimeout >/dev/null 2>&1; then TIMEOUT="gtimeout 10"
+else TIMEOUT=""; fi
+
+severity=0
+
+# check_app <label> <kamal-destination-or-empty>
+check_app() {
+    local label="$1" dest="$2" details up
+    # $TIMEOUT is intentionally unquoted (word-splits into prog + arg, or nothing).
+    if [[ -n "$dest" ]]; then
+        details=$($TIMEOUT kamal app details -q -d "$dest" 2>/dev/null) || {
+            echo "⚠ ${label}: unreachable (kamal timed out or errored)"; severity=1; return; }
+    else
+        details=$($TIMEOUT kamal app details -q 2>/dev/null) || {
+            echo "⚠ ${label}: unreachable (kamal timed out or errored)"; severity=1; return; }
+    fi
+    # Detect status by the word "Up" (portable; no leading-digit assumption).
+    if grep -qw Up <<<"$details"; then
+        # Friendly duration: text after "Up " up to the next comma/paren; may be
+        # non-numeric ("About a minute"). Empty is fine — just report "up".
+        up=$(sed -n 's/.*Up \([^,)]*\).*/\1/p' <<<"$details" | head -1)
+        if [[ -n "$up" ]]; then echo "✓ ${label}: up (${up})"; else echo "✓ ${label}: up"; fi
+    else
+        echo "⚠ ${label}: down"
+        severity=1
+    fi
+}
+
+check_app "Production" "$PROD_KAMAL_DEST"
+[[ -n "$STAGING_KAMAL_DEST" ]] && check_app "Staging" "$STAGING_KAMAL_DEST"
+
+exit "$severity"

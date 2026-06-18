@@ -1,0 +1,56 @@
+#!/bin/bash
+#
+# health check: stub location
+#
+# Verifies ~/.local/bin/<PLUGIN_NAME> exists and is a valid launcher for the
+# installed plugin — either a symlink to the bundled stub / installed script,
+# or the registry-resolving wrapper stub (which locates the plugin dynamically
+# via installed_plugins.json and hardcodes no absolute path). This is what makes
+# the bare command work in a plain terminal outside Claude Code.
+#
+# READ-ONLY — inspects, suggests, never mutates.
+#
+# Env (from runner): PLUGIN_ROOT PLUGIN_NAME PROJECT_ROOT CONFIG
+# Exit: 0 pass · 1 advisory · 2 blocker
+set -u
+
+PLUGIN_NAME="${PLUGIN_NAME:-}"
+PLUGIN_ROOT="${PLUGIN_ROOT:-}"
+STUB="$HOME/.local/bin/${PLUGIN_NAME}"
+STUB_SRC="$PLUGIN_ROOT/skills/${PLUGIN_NAME}/stubs/${PLUGIN_NAME}"
+
+suggest() {
+    echo "    mkdir -p ~/.local/bin && ln -sf \"$STUB_SRC\" \"$STUB\""
+}
+
+if [[ ! -e "$STUB" && ! -L "$STUB" ]]; then
+    echo "⚠ ${PLUGIN_NAME} stub not found at $STUB"
+    suggest
+    exit 1
+fi
+
+# Symlink to the bundled stub or the installed script — both are valid installs.
+if [[ -L "$STUB" ]]; then
+    target=$(readlink "$STUB")
+    case "$target" in
+        */skills/"${PLUGIN_NAME}"/stubs/"${PLUGIN_NAME}" | */skills/"${PLUGIN_NAME}"/scripts/"${PLUGIN_NAME}")
+            echo "✓ ${PLUGIN_NAME} stub at $STUB links to the installed plugin"
+            exit 0
+            ;;
+    esac
+    echo "⚠ ${PLUGIN_NAME} stub at $STUB points elsewhere ($target)"
+    suggest
+    exit 1
+fi
+
+# Regular file: the registry-resolving wrapper stub. Recognise it by the
+# relative script path or the registry/prefix markers it carries — it never
+# hardcodes an absolute path, so do NOT compare against one.
+if grep -qE "skills/${PLUGIN_NAME}/scripts/${PLUGIN_NAME}|installed_plugins\.json|${PLUGIN_NAME}@" "$STUB" 2>/dev/null; then
+    echo "✓ ${PLUGIN_NAME} stub at $STUB is a registry-resolving wrapper for the installed plugin"
+    exit 0
+fi
+
+echo "⚠ ${PLUGIN_NAME} stub at $STUB does not resolve to the installed plugin"
+suggest
+exit 1

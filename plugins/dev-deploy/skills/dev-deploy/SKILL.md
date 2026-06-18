@@ -37,7 +37,7 @@ dev-deploy stop                      # Stop production app (default)
 
 dev-deploy setup --refresh-db        # Refresh staging DB from production
 
-dev-deploy health                    # Full health check (apps, branches, server)
+dev-deploy health                    # Unified pluggable health — install + deploy checks, read-only
 ```
 
 ## The --check Rule
@@ -60,7 +60,7 @@ Project-specific scripts called at key moments. Hooks receive config as environm
 | `refresh_db`  | `setup --refresh-db` or `deploy staging --refresh-db` | Copy production data to staging          |
 | `pre_deploy`  | `deploy staging` / `deploy production`                | Run before Kamal deploy                  |
 | `post_deploy` | `deploy staging` / `deploy production`                | Run after Kamal deploy                   |
-| `health`      | `health`                                              | Custom server health checks              |
+| `health`      | the `50-server` health check                          | Custom server health checks              |
 
 Scaffold example hooks with `dev-deploy init --hooks`.
 
@@ -83,4 +83,4 @@ Read the relevant reference doc before multi-step operations:
 - `references/staging-flow.md` — Full staging workflow (stage → deploy → verify)
 - `references/production-flow.md` — Production promotion (backup → promote → deploy)
 - `references/hooks.md` — Writing and configuring hooks
-- `references/health.md` — Health check details and custom hooks
+- `references/health.md` — Unified pluggable health runner (`health`): install checks (scope/stub) + deploy checks (Kamal apps, branch sync, server)

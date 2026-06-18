@@ -67,6 +67,8 @@ dev-workspace cleanup claude-code     Scan for Claude Code conversation exports
 
 dev-workspace tree                    Generate all configured trees (default + named)
 dev-workspace tree --show             List available trees (name + description)
+
+dev-workspace health                  Advisory plugin install-health check (read-only)
 ```
 
 ## The --check Pattern
@@ -158,3 +160,9 @@ Read when generating trees or configuring tree output. You need this because:
 - Configuration has global ignores and per-tree ignores with additive behaviour
 - Frontmatter format must be correct for `--show` to parse it
 - Tree output is ephemeral (git-ignored) and regenerated each session
+
+### `references/health.md` — Plugin Install-Health Checks
+Read when running `health` or adding a check. You need this because:
+- Checks are pluggable scripts in `hooks/health/` — the contract (env in, status/exit-code out) must be followed exactly
+- It is advisory and read-only — checks suggest commands, never run them
+- Distinct from the `/health` slash command (repository health, not install health)
