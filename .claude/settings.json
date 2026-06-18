@@ -3,5 +3,45 @@
   "plansDirectory": "./dev/workspace/plans",
   "enabledPlugins": {
     "dev-workspace@DBHD-Plugins": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(dev-workspace)",
+      "Bash(dev-workspace info)",
+      "Bash(dev-workspace help:*)",
+      "Bash(dev-workspace version)",
+      "Bash(dev-workspace health:*)",
+      "Bash(dev-workspace tree:*)",
+      "Bash(dev-workspace cleanup:*)",
+      "Bash(dev-workspace push:*)",
+      "Bash(dev-workspace archive:*)",
+      "Bash(dev-workspace commit:*)",
+      "Bash(dev-workspace new:*)",
+      "Bash(dev-workspace sync --check:*)",
+      "Bash(dev-workspace merge --check:*)",
+      "Bash(dev-workspace latest --check:*)",
+      "Bash(dev-workspace transfer-latest --check:*)",
+      "Bash(dev-workspace deploy push --check:*)",
+      "Bash(dev-workspace init --check:*)"
+    ],
+    "ask": [
+      "Bash(dev-workspace sync)",
+      "Bash(dev-workspace sync --full:*)",
+      "Bash(dev-workspace sync --rebase:*)",
+      "Bash(dev-workspace sync --continue:*)",
+      "Bash(dev-workspace merge)",
+      "Bash(dev-workspace merge --local:*)",
+      "Bash(dev-workspace merge --github:*)",
+      "Bash(dev-workspace merge --continue:*)",
+      "Bash(dev-workspace latest --upstream:*)",
+      "Bash(dev-workspace latest --origin:*)",
+      "Bash(dev-workspace transfer-latest)",
+      "Bash(dev-workspace transfer-latest --ff:*)",
+      "Bash(dev-workspace transfer-latest --continue:*)",
+      "Bash(dev-workspace deploy push)",
+      "Bash(dev-workspace init)",
+      "Bash(dev-workspace init --write:*)",
+      "Bash(dev-workspace init --update:*)"
+    ]
   }
 }
