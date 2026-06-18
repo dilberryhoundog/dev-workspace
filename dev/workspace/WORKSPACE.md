@@ -6,28 +6,28 @@ Branch workspace context for Claude and humans. Not read by the dev-workspace sc
 
 ## Branch
 
-**Name:**
-**Started:**
+**Name:** fix/conversation-capture-config
+**Started:** 2026-06-18
 **Status:**
 
-- [ ] In Progress
+- [x] In Progress
 - [ ] Discard (workspace and branch abandoned)
 - [ ] Complete (ready to merge)
 
 ## Purpose
 
-%% Claude: write a brief purpose statement when creating the workspace %%
+Complete the conversion of the `conversation-capture` skill into a dev-workspace-native skill. Move its configuration out of the bundled (update-volatile) `config.yml` and into the per-workspace `dev/workspace/workspace-config.yml` under a `conversation_capture:` section. Add a graceful non-workspace guard, a `bin/fix-conversation-capture` migration helper for existing workspaces, and wire the currently-dead `include_subagents` toggle.
 
 ## Workflow
 
-- [ ] Quick (direct implementation)
+- [x] Quick (direct implementation)
 - [ ] Single plan (plan once, execute)
 - [ ] Multi-stage plan (iterative planning)
 
 ## Track Issues
 
-- [ ] Track GitHub issues
-    - <!-- Add issue numbers: #123, #456 -->
+- [x] Track GitHub issues
+    - #10
 
 ## Testing
 
