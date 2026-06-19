@@ -12,14 +12,14 @@ Install the plugin, run one init in your project, and you're working.
 
 ## Install
 
-Dev Workspace ships from the **DBHD-Plugins** marketplace. Inside Claude Code:
+Dev Workspace ships from the **DBHD-dev-workspace** marketplace. Inside Claude Code:
 
 ```
-/plugin marketplace add dilberryhoundog/agent-library
-/plugin install dev-workspace@DBHD-Plugins
+/plugin marketplace add dilberryhoundog/dev-workspace
+/plugin install dev-workspace@DBHD-dev-workspace
 ```
 
-> The companion `dev-deploy` plugin (Kamal staging/production pipelines) and the `chat-tools` plugin (conversation capture + prompt triggers, see below) live in the same marketplace and install the same way.
+> The companion `dev-deploy` plugin (Kamal staging/production pipelines) lives in the same marketplace and installs the same way.
 
 Then, in the root of any project you want a workspace in:
 

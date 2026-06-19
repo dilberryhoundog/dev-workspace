@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "DBHD-dev-workspace",
+  "owner": {
+    "name": "dilberryhoundog",
+    "email": "tech@grahams.coffee"
+  },
+  "plugins": [
+    {
+      "name": "dev-workspace",
+      "description": "A comprehensive skill set for managing agent context, efficient git commands, conversation management, context shaping. etc",
+      "source": "./plugins/dev-workspace",
+      "category": "development"
+    },
+    {
+      "name": "dev-deploy",
+      "description": "A companion skill for dev-workspace. Efficient deployment using kamal",
+      "source": "./plugins/dev-deploy",
+      "category": "deployment"
+    }
+  ]
+}
