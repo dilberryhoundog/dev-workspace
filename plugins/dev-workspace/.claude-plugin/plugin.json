@@ -16,7 +16,5 @@
     "archive",
     "merge"
   ],
-  "dependencies": [
-    "chat-tools"
-  ]
+  "dependencies": ["chat-tools@DBHD-Plugins"]
 }

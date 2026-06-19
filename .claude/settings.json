@@ -1,9 +1,4 @@
 {
-  "outputStyle": "default",
-  "plansDirectory": "./dev/workspace/plans",
-  "enabledPlugins": {
-    "dev-workspace@DBHD-Plugins": true
-  },
   "permissions": {
     "allow": [
       "Bash(dev-workspace)",
@@ -43,5 +38,10 @@
       "Bash(dev-workspace init --write:*)",
       "Bash(dev-workspace init --update:*)"
     ]
-  }
+  },
+  "enabledPlugins": {
+    "dev-workspace@DBHD-dev-workspace": true
+  },
+  "outputStyle": "default",
+  "plansDirectory": "./dev/workspace/plans"
 }
