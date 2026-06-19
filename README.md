@@ -103,13 +103,13 @@ A light set of plugin hooks keeps context fresh automatically:
 
 The tree, plus your `CLAUDE.md` and `WORKSPACE.md` (pulled in via the project's context rule), are silently surfaced to Claude at session start. `tree.md` is the most token-efficient way to show Claude every relevant file and folder — no more blind searching. File and folder names reveal a surprising amount of logic and flow; this becomes a kind of superpower.
 
-## Companion superpowers — the `chat-tools` plugin
+## Superpowers — built in and companion
 
-Two of Dev Workspace's most loved features now ship in the companion **`chat-tools`** plugin, so you can use them anywhere — not just inside a workspace.
+Two of Dev Workspace's most loved features. **Conversation Capture** ships in this plugin. **Prompt Triggers** now live in the companion **`chat-tools`** plugin (available from the universal `DBHD-Plugins` marketplace), so you can use them anywhere — not just inside a workspace.
 
 ### Conversation Capture
 
-A premium context-capture tool. Every conversation with Claude can be parsed, summarised and recorded in your workspace `history/`, ready to re-read, inject into another session, or mine for patterns.
+A premium context-capture tool, built into Dev Workspace. Every conversation with Claude can be parsed, summarised and recorded in your workspace `history/`, ready to re-read, inject into another session, or mine for patterns.
 
 - Rich, readable, token-efficient history files built from configurable templates.
 - Records the flow of reads, writes, edits, bash, agents and skills — *what* happened, without the bulky file contents.
@@ -117,7 +117,7 @@ A premium context-capture tool. Every conversation with Claude can be parsed, su
 
 A great workflow: chat with Claude to explore and discover, capture the transcript, then start a fresh session and load that transcript — advanced, token-saving, naturally-built context with none of the bloat.
 
-### Prompt Triggers (magic-reply)
+### Prompt Triggers (magic-reply) — companion `chat-tools`
 
 Back when Sonnet 3.5 was the world's best coding model, I built a context-shaping system using styles ([my pinned Reddit guide](https://www.reddit.com/r/ClaudeAI/comments/1i4c6jx/my_guide_to_using_styles_effectively)). Over a year later those styles are still gold — and now they're a trigger away. Drop a phrase between `--` delimiters and Claude's next reply changes shape:
 
